@@ -1,10 +1,16 @@
 # webull_lightweight_chart.py
 
 import json
+import requests
 import streamlit as st
 import yfinance as yf
 import pandas as pd
 import streamlit.components.v1 as components
+
+try:
+    from pykrx import stock
+except Exception:
+    stock = None
 
 st.set_page_config(page_title="Webull Style Chart", layout="wide")
 st.title("Webull 스타일 주식 차트")
@@ -13,29 +19,141 @@ st.markdown(
     """
     <style>
     @media (max-width: 768px) {
-        h1 {
-            font-size: 24px !important;
-        }
-
+        h1 { font-size: 24px !important; }
         .block-container {
             padding-left: 0.6rem !important;
             padding-right: 0.6rem !important;
             padding-top: 1rem !important;
         }
-
-        div[data-testid="stMetric"] {
-            padding: 4px 0;
-        }
+        div[data-testid="stMetric"] { padding: 4px 0; }
     }
     </style>
     """,
     unsafe_allow_html=True
 )
 
+@st.cache_data(ttl=86400)
+def get_korean_stocks():
+    items = []
+
+    if stock is None:
+        return items
+
+    today = pd.Timestamp.today().strftime("%Y%m%d")
+
+    markets = [
+        ("KOSPI", ".KS"),
+        ("KOSDAQ", ".KQ"),
+    ]
+
+    for market, suffix in markets:
+        try:
+            tickers = stock.get_market_ticker_list(today, market=market)
+
+            for code in tickers:
+                name = stock.get_market_ticker_name(code)
+                yahoo_code = f"{code}{suffix}"
+
+                items.append({
+                    "label": f"{name} ({code}) - {market}",
+                    "ticker": yahoo_code,
+                    "name": name,
+                    "code": code,
+                    "market": market
+                })
+
+        except Exception:
+            pass
+
+    return items
+
+
+@st.cache_data(ttl=3600)
+def search_us_stocks(keyword):
+    if not keyword or len(keyword.strip()) < 2:
+        return []
+
+    url = "https://query2.finance.yahoo.com/v1/finance/search"
+
+    params = {
+        "q": keyword,
+        "quotesCount": 10,
+        "newsCount": 0
+    }
+
+    try:
+        response = requests.get(url, params=params, timeout=5)
+        response.raise_for_status()
+        data = response.json()
+
+        results = []
+
+        for item in data.get("quotes", []):
+            symbol = item.get("symbol", "")
+            name = item.get("shortname") or item.get("longname") or symbol
+            quote_type = item.get("quoteType", "")
+
+            if quote_type in ["EQUITY", "ETF", "INDEX"]:
+                results.append({
+                    "label": f"{name} ({symbol}) - US",
+                    "ticker": symbol,
+                    "name": name,
+                    "code": symbol,
+                    "market": "US"
+                })
+
+        return results
+
+    except Exception:
+        return []
+
+
+def search_stocks(keyword):
+    keyword = keyword.strip()
+
+    korean_stocks = get_korean_stocks()
+    results = []
+
+    if keyword:
+        lower_keyword = keyword.lower()
+
+        for item in korean_stocks:
+            if (
+                keyword in item["name"]
+                or keyword in item["code"]
+                or lower_keyword in item["label"].lower()
+            ):
+                results.append(item)
+
+        results.extend(search_us_stocks(keyword))
+
+    if not results:
+        results = [{
+            "label": "삼성전자 (005930) - KOSPI",
+            "ticker": "005930.KS",
+            "name": "삼성전자",
+            "code": "005930",
+            "market": "KOSPI"
+        }]
+
+    return results[:30]
+
+
 col1, col2, col3 = st.columns(3)
 
 with col1:
-    ticker = st.text_input("종목코드", value="005930.KS")
+    keyword = st.text_input("종목명 또는 종목코드", value="삼성전자")
+
+search_results = search_stocks(keyword)
+
+option_labels = [item["label"] for item in search_results]
+option_map = {item["label"]: item for item in search_results}
+
+with col1:
+    selected_label = st.selectbox("검색 결과", option_labels)
+
+selected_item = option_map[selected_label]
+ticker = selected_item["ticker"]
 
 with col2:
     period = st.selectbox(
@@ -50,6 +168,8 @@ with col3:
         ["일봉", "주봉", "월봉"],
         index=0
     )
+
+st.caption(f"선택 종목: {selected_item['label']} / Yahoo Finance 코드: `{ticker}`")
 
 interval_map = {
     "일봉": "1d",
@@ -71,7 +191,7 @@ if isinstance(data.columns, pd.MultiIndex):
     data.columns = data.columns.get_level_values(0)
 
 if data.empty:
-    st.error("데이터를 가져오지 못했습니다. 종목코드를 확인해주세요.")
+    st.error("데이터를 가져오지 못했습니다. 종목명 또는 종목코드를 확인해주세요.")
     st.stop()
 
 data.index = pd.to_datetime(data.index)
@@ -134,6 +254,7 @@ for _, row in data.iterrows():
         "close": round(float(row["Close"]), 2),
     })
 
+
 def make_line(series_name):
     result = []
 
@@ -144,6 +265,7 @@ def make_line(series_name):
         })
 
     return result
+
 
 ma5 = make_line("MA5")
 ma20 = make_line("MA20")
