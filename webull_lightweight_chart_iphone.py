@@ -169,11 +169,15 @@ html = f"""
             width: 100%;
             height: 620px;
             position: relative;
+            touch-action: none;
+            -webkit-user-select: none;
+            user-select: none;
         }}
 
         @media (max-width: 768px) {{
             #chart {{
                 height: 520px;
+                touch-action: none;
             }}
 
             .ma-legend {{
@@ -370,21 +374,21 @@ html = f"""
             handleScale: {{
                 mouseWheel: false,
                 pinch: true,
-                axisPressedMouseMove: {
+                axisPressedMouseMove: {{
                     time: true,
-                    price: true,
-                },
-                axisDoubleClickReset: {
-                    time: trun,
-                    price: true,
-                },
-            },
+                    price: true
+                }},
+                axisDoubleClickReset: {{
+                    time: true,
+                    price: true
+                }},
+            }},
 
             handleScroll: {{
                 mouseWheel: true,
                 pressedMouseMove: true,
                 horzTouchDrag: true,
-                vertTouchDrag: false,
+                vertTouchDrag: true,
             }},
         }});
 
