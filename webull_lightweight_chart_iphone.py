@@ -39,7 +39,7 @@ def get_korean_stocks():
     if stock is None:
         return items
 
-    today = pd.Timestamp.today().strftime("%Y%m%d")
+    today = stock.get_nearest_business_day_in_a_week()
 
     markets = [
         ("KOSPI", ".KS"),
