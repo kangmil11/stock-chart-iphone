@@ -370,9 +370,15 @@ html = f"""
             handleScale: {{
                 mouseWheel: false,
                 pinch: true,
-                axisPressedMouseMove: true,
-                axisDoubleClickReset: true,
-            }},
+                axisPressedMouseMove: {
+                    time: true,
+                    price: true,
+                },
+                axisDoubleClickReset: {
+                    time: trun,
+                    price: true,
+                },
+            },
 
             handleScroll: {{
                 mouseWheel: true,
