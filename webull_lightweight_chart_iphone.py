@@ -15,25 +15,40 @@ except Exception:
 st.set_page_config(page_title="Webull Style Chart", layout="wide")
 st.title("Webull 스타일 주식 차트")
 
+# =========================
+# 모바일 최적화
+# =========================
+
 st.markdown(
     """
     <style>
     @media (max-width: 768px) {
-        h1 { font-size: 24px !important; }
+        h1 {
+            font-size: 24px !important;
+        }
+
         .block-container {
             padding-left: 0.6rem !important;
             padding-right: 0.6rem !important;
             padding-top: 1rem !important;
         }
-        div[data-testid="stMetric"] { padding: 4px 0; }
+
+        div[data-testid="stMetric"] {
+            padding: 4px 0;
+        }
     }
     </style>
     """,
     unsafe_allow_html=True
 )
 
+# =========================
+# 한국 종목 전체 로딩
+# =========================
+
 @st.cache_data(ttl=86400)
 def get_korean_stocks():
+
     items = []
 
     if stock is None:
@@ -47,16 +62,17 @@ def get_korean_stocks():
     ]
 
     for market, suffix in markets:
+
         try:
             tickers = stock.get_market_ticker_list(today, market=market)
 
             for code in tickers:
+
                 name = stock.get_market_ticker_name(code)
-                yahoo_code = f"{code}{suffix}"
 
                 items.append({
                     "label": f"{name} ({code}) - {market}",
-                    "ticker": yahoo_code,
+                    "ticker": f"{code}{suffix}",
                     "name": name,
                     "code": code,
                     "market": market
@@ -67,9 +83,13 @@ def get_korean_stocks():
 
     return items
 
+# =========================
+# 미국 종목 검색
+# =========================
 
 @st.cache_data(ttl=3600)
 def search_us_stocks(keyword):
+
     if not keyword or len(keyword.strip()) < 2:
         return []
 
@@ -82,18 +102,22 @@ def search_us_stocks(keyword):
     }
 
     try:
+
         response = requests.get(url, params=params, timeout=5)
         response.raise_for_status()
+
         data = response.json()
 
         results = []
 
         for item in data.get("quotes", []):
+
             symbol = item.get("symbol", "")
             name = item.get("shortname") or item.get("longname") or symbol
             quote_type = item.get("quoteType", "")
 
             if quote_type in ["EQUITY", "ETF", "INDEX"]:
+
                 results.append({
                     "label": f"{name} ({symbol}) - US",
                     "ticker": symbol,
@@ -107,55 +131,102 @@ def search_us_stocks(keyword):
     except Exception:
         return []
 
+# =========================
+# 통합 검색
+# =========================
 
 def search_stocks(keyword):
-    keyword = keyword.strip()
 
     korean_stocks = get_korean_stocks()
+
     results = []
 
-    if keyword:
-        lower_keyword = keyword.lower()
+    keyword = keyword.strip()
+    lower_keyword = keyword.lower()
 
-        for item in korean_stocks:
-            if (
-                keyword in item["name"]
-                or keyword in item["code"]
-                or lower_keyword in item["label"].lower()
-            ):
-                results.append(item)
+    # 한국 종목 검색
+    for item in korean_stocks:
 
-        results.extend(search_us_stocks(keyword))
+        if (
+            keyword in item["name"]
+            or keyword in item["code"]
+            or lower_keyword in item["label"].lower()
+        ):
+            results.append(item)
 
-    if not results:
-        results = [{
-            "label": "삼성전자 (005930) - KOSPI",
-            "ticker": "005930.KS",
-            "name": "삼성전자",
-            "code": "005930",
-            "market": "KOSPI"
-        }]
+    # 미국 종목 검색
+    results.extend(search_us_stocks(keyword))
 
-    return results[:30]
+    # 중복 제거
+    unique = []
 
+    seen = set()
+
+    for item in results:
+
+        if item["ticker"] not in seen:
+            unique.append(item)
+            seen.add(item["ticker"])
+
+    return unique[:30]
+
+# =========================
+# 검색 UI
+# =========================
 
 col1, col2, col3 = st.columns(3)
 
 with col1:
-    keyword = st.text_input("종목명 또는 종목코드", value="삼성전자")
 
-search_results = search_stocks(keyword)
+    keyword = st.text_input(
+        "종목명 또는 종목코드",
+        value="삼성전자"
+    )
+
+    search_clicked = st.button("검색")
+
+# 최초 상태
+if "last_keyword" not in st.session_state:
+    st.session_state.last_keyword = "삼성전자"
+
+# 버튼 클릭 시 검색어 저장
+if search_clicked:
+    st.session_state.last_keyword = keyword
+
+# 검색 실행
+search_results = search_stocks(st.session_state.last_keyword)
+
+# 결과 없을 경우
+if not search_results:
+
+    st.warning("검색 결과가 없습니다.")
+
+    st.stop()
 
 option_labels = [item["label"] for item in search_results]
-option_map = {item["label"]: item for item in search_results}
+
+option_map = {
+    item["label"]: item
+    for item in search_results
+}
 
 with col1:
-    selected_label = st.selectbox("검색 결과", option_labels)
+
+    selected_label = st.selectbox(
+        "검색 결과",
+        option_labels
+    )
 
 selected_item = option_map[selected_label]
+
 ticker = selected_item["ticker"]
 
+# =========================
+# 기간 / 봉 선택
+# =========================
+
 with col2:
+
     period = st.selectbox(
         "조회 기간",
         ["3mo", "6mo", "1y", "2y", "3y", "5y"],
@@ -163,13 +234,12 @@ with col2:
     )
 
 with col3:
+
     interval_label = st.selectbox(
         "봉 간격",
         ["일봉", "주봉", "월봉"],
         index=0
     )
-
-st.caption(f"선택 종목: {selected_item['label']} / Yahoo Finance 코드: `{ticker}`")
 
 interval_map = {
     "일봉": "1d",
@@ -178,6 +248,14 @@ interval_map = {
 }
 
 interval = interval_map[interval_label]
+
+st.caption(
+    f"선택 종목: {selected_item['label']} / Yahoo 코드: {ticker}"
+)
+
+# =========================
+# 데이터 다운로드
+# =========================
 
 data = yf.download(
     ticker,
@@ -191,51 +269,14 @@ if isinstance(data.columns, pd.MultiIndex):
     data.columns = data.columns.get_level_values(0)
 
 if data.empty:
-    st.error("데이터를 가져오지 못했습니다. 종목명 또는 종목코드를 확인해주세요.")
+
+    st.error("데이터를 가져오지 못했습니다.")
+
     st.stop()
 
-data.index = pd.to_datetime(data.index)
-
-monthly_double_bands = []
-merged_double_bands = []
-
-if interval_label == "일봉":
-    monthly_groups = data.groupby(data.index.to_period("M"))
-
-    for _, group in monthly_groups:
-        if len(group) < 2:
-            continue
-
-        month_open = float(group["Open"].iloc[0])
-        month_close = float(group["Close"].iloc[-1])
-        is_up = month_close >= month_open
-
-        monthly_double_bands.append({
-            "start": group.index.min().strftime("%Y-%m-%d"),
-            "end": group.index.max().strftime("%Y-%m-%d"),
-            "open": round(month_open, 2),
-            "close": round(month_close, 2),
-            "up": is_up
-        })
-
-    current_group = None
-
-    for band in monthly_double_bands:
-        if current_group is None:
-            current_group = band.copy()
-        elif current_group["up"] == band["up"]:
-            current_group["end"] = band["end"]
-            current_group["close"] = band["close"]
-        else:
-            merged_double_bands.append(current_group)
-            current_group = band.copy()
-
-    if current_group is not None:
-        merged_double_bands.append(current_group)
-
-data = data.reset_index()
-date_col = "Date" if "Date" in data.columns else "Datetime"
-data["time"] = pd.to_datetime(data[date_col]).dt.strftime("%Y-%m-%d")
+# =========================
+# 이동평균
+# =========================
 
 data["MA5"] = data["Close"].rolling(5).mean()
 data["MA20"] = data["Close"].rolling(20).mean()
@@ -243,9 +284,22 @@ data["MA60"] = data["Close"].rolling(60).mean()
 data["MA120"] = data["Close"].rolling(120).mean()
 data["MA240"] = data["Close"].rolling(240).mean()
 
+data = data.reset_index()
+
+date_col = "Date" if "Date" in data.columns else "Datetime"
+
+data["time"] = pd.to_datetime(
+    data[date_col]
+).dt.strftime("%Y-%m-%d")
+
+# =========================
+# 캔들 데이터
+# =========================
+
 candles = []
 
 for _, row in data.iterrows():
+
     candles.append({
         "time": row["time"],
         "open": round(float(row["Open"]), 2),
@@ -254,11 +308,16 @@ for _, row in data.iterrows():
         "close": round(float(row["Close"]), 2),
     })
 
+# =========================
+# MA 데이터
+# =========================
 
 def make_line(series_name):
+
     result = []
 
     for _, row in data.dropna(subset=[series_name]).iterrows():
+
         result.append({
             "time": row["time"],
             "value": round(float(row[series_name]), 2)
@@ -266,463 +325,156 @@ def make_line(series_name):
 
     return result
 
-
 ma5 = make_line("MA5")
 ma20 = make_line("MA20")
 ma60 = make_line("MA60")
 ma120 = make_line("MA120")
 ma240 = make_line("MA240")
 
+# =========================
+# 차트 HTML
+# =========================
+
 html = f"""
 <!DOCTYPE html>
 <html>
+
 <head>
-    <script src="https://unpkg.com/lightweight-charts@4.1.1/dist/lightweight-charts.standalone.production.js"></script>
 
-    <style>
-        body {{
-            margin: 0;
-            background: #0b0f14;
-            color: white;
-            font-family: Arial, sans-serif;
-        }}
+<script src="https://unpkg.com/lightweight-charts@4.1.1/dist/lightweight-charts.standalone.production.js"></script>
 
-        #chart {{
-            width: 100%;
-            height: 620px;
-            position: relative;
-            touch-action: none;
-            -webkit-user-select: none;
-            user-select: none;
-        }}
+<style>
 
-        @media (max-width: 768px) {{
-            #chart {{
-                height: 520px;
-                touch-action: none;
-            }}
+body {{
+    margin:0;
+    background:#0b0f14;
+}}
 
-            .ma-legend {{
-                font-size: 11px;
-                padding: 4px 6px;
-                top: 8px;
-                left: 8px;
-            }}
+#chart {{
+    width:100%;
+    height:620px;
+    touch-action:none;
+}}
 
-            .ma-legend span {{
-                margin-right: 6px;
-            }}
+</style>
 
-            .double-btn {{
-                font-size: 11px;
-                padding: 1px 6px;
-                margin-left: 4px;
-            }}
-
-            .tooltip {{
-                font-size: 11px;
-            }}
-        }}
-
-        #double-month-bands,
-        #month-lines {{
-            position: absolute;
-            top: 0;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            pointer-events: none;
-        }}
-
-        #double-month-bands {{
-            z-index: 6;
-        }}
-
-        #month-lines {{
-            z-index: 7;
-        }}
-
-        .month-line {{
-            position: absolute;
-            top: 0;
-            bottom: 0;
-            width: 1px;
-            border-left: 1px dotted rgba(180, 180, 180, 0.35);
-        }}
-
-        .double-month-band {{
-            position: absolute;
-            pointer-events: none;
-            border-radius: 2px;
-        }}
-
-        .double-month-up {{
-            background: rgba(255, 0, 0, 0.28);
-            border: 1px solid rgba(255, 0, 0, 0.45);
-        }}
-
-        .double-month-down {{
-            background: rgba(0, 80, 255, 0.28);
-            border: 1px solid rgba(0, 80, 255, 0.45);
-        }}
-
-        .ma-legend {{
-            position: absolute;
-            top: 12px;
-            left: 16px;
-            z-index: 20;
-            font-size: 13px;
-            background: rgba(11, 15, 20, 0.72);
-            padding: 6px 8px;
-            border-radius: 6px;
-        }}
-
-        .ma-legend span {{
-            margin-right: 12px;
-        }}
-
-        .double-btn {{
-            margin-left: 8px;
-            padding: 2px 8px;
-            border: 1px solid rgba(255,255,255,0.35);
-            border-radius: 5px;
-            background: rgba(255,255,255,0.08);
-            color: white;
-            cursor: pointer;
-            font-size: 12px;
-        }}
-
-        .double-btn.mode1 {{
-            background: rgba(255,255,255,0.28);
-        }}
-
-        .double-btn.mode2 {{
-            background: rgba(255, 200, 0, 0.35);
-        }}
-
-        .tooltip {{
-            position: absolute;
-            display: none;
-            padding: 8px 10px;
-            background: rgba(20, 24, 30, 0.92);
-            color: #fff;
-            border: 1px solid rgba(255,255,255,0.15);
-            border-radius: 6px;
-            font-size: 12px;
-            z-index: 30;
-            pointer-events: none;
-            line-height: 1.5;
-        }}
-    </style>
 </head>
 
 <body>
-    <div id="chart">
-        <div id="double-month-bands"></div>
-        <div id="month-lines"></div>
 
-        <div class="ma-legend">
-            <span style="color:white">MA5</span>
-            <span style="color:red">MA20</span>
-            <span style="color:limegreen">MA60</span>
-            <span style="color:dodgerblue">MA120</span>
-            <span style="color:pink">MA240</span>
-            <button id="double-toggle" class="double-btn" type="button">Double</button>
-        </div>
+<div id="chart"></div>
 
-        <div id="tooltip" class="tooltip"></div>
-    </div>
+<script>
 
-    <script>
-        const candles = {json.dumps(candles)};
-        const monthlyDoubleBands = {json.dumps(monthly_double_bands)};
-        const mergedDoubleBands = {json.dumps(merged_double_bands)};
+const candles = {json.dumps(candles)};
+const ma5 = {json.dumps(ma5)};
+const ma20 = {json.dumps(ma20)};
+const ma60 = {json.dumps(ma60)};
+const ma120 = {json.dumps(ma120)};
+const ma240 = {json.dumps(ma240)};
 
-        const ma5 = {json.dumps(ma5)};
-        const ma20 = {json.dumps(ma20)};
-        const ma60 = {json.dumps(ma60)};
-        const ma120 = {json.dumps(ma120)};
-        const ma240 = {json.dumps(ma240)};
+const chart = LightweightCharts.createChart(
+    document.getElementById('chart'),
+    {{
+        layout: {{
+            background: {{ color:'#0b0f14' }},
+            textColor:'#d9d9d9',
+        }},
 
-        const chartElement = document.getElementById('chart');
-        const tooltip = document.getElementById('tooltip');
-        const monthLinesLayer = document.getElementById('month-lines');
-        const doubleMonthLayer = document.getElementById('double-month-bands');
-        const doubleToggle = document.getElementById('double-toggle');
+        rightPriceScale: {{
+            visible:true,
+        }},
 
-        const chartHeight = window.innerWidth <= 768 ? 520 : 620;
+        leftPriceScale: {{
+            visible:false,
+        }},
 
-        let doubleMode = 0;
-
-        const chart = LightweightCharts.createChart(chartElement, {{
-            width: chartElement.clientWidth,
-            height: chartHeight,
-
-            layout: {{
-                background: {{ color: '#0b0f14' }},
-                textColor: '#d9d9d9',
-            }},
-
-            grid: {{
-                vertLines: {{ color: 'rgba(255,255,255,0.08)' }},
-                horzLines: {{ color: 'rgba(255,255,255,0.08)' }},
-            }},
-
-            rightPriceScale: {{
-                visible: true,
-                borderColor: 'rgba(255,255,255,0.2)',
-            }},
-
-            leftPriceScale: {{
-                visible: false,
-            }},
-
-            localization: {{
-                priceFormatter: function(price) {{
-                    return Math.round(price).toLocaleString();
-                }},
-            }},
-
-            timeScale: {{
-                borderColor: 'rgba(255,255,255,0.2)',
-                timeVisible: true,
-                secondsVisible: false,
-            }},
-
-            crosshair: {{
-                mode: LightweightCharts.CrosshairMode.Normal,
-            }},
-
-            handleScale: {{
-                mouseWheel: false,
-                pinch: true,
-                axisPressedMouseMove: {{
-                    time: true,
-                    price: true
-                }},
-                axisDoubleClickReset: {{
-                    time: true,
-                    price: true
-                }},
-            }},
-
-            handleScroll: {{
-                mouseWheel: true,
-                pressedMouseMove: true,
-                horzTouchDrag: true,
-                vertTouchDrag: true,
-            }},
-        }});
-
-        const candleSeries = chart.addCandlestickSeries({{
-            upColor: '#FF3333',
-            downColor: '#1E5BFF',
-            borderUpColor: '#FF3333',
-            borderDownColor: '#1E5BFF',
-            wickUpColor: '#FF3333',
-            wickDownColor: '#1E5BFF',
-
-            priceFormat: {{
-                type: 'price',
-                precision: 0,
-                minMove: 1,
-            }},
-        }});
-
-        candleSeries.setData(candles);
-
-        function addLine(data, color) {{
-            const line = chart.addLineSeries({{
-                color: color,
-                lineWidth: 2,
-                title: '',
-                priceLineVisible: false,
-                lastValueVisible: false,
-
-                priceFormat: {{
-                    type: 'price',
-                    precision: 0,
-                    minMove: 1,
-                }},
-            }});
-
-            line.setData(data);
-        }}
-
-        addLine(ma5, 'white');
-        addLine(ma20, 'red');
-        addLine(ma60, 'limegreen');
-        addLine(ma120, 'dodgerblue');
-        addLine(ma240, 'pink');
-
-        const candleMap = new Map();
-
-        candles.forEach(function(item) {{
-            candleMap.set(item.time, item);
-        }});
-
-        chart.subscribeCrosshairMove(function(param) {{
-            if (!param || !param.time || !param.point) {{
-                tooltip.style.display = 'none';
-                return;
+        localization: {{
+            priceFormatter: function(price) {{
+                return Math.round(price).toLocaleString();
             }}
+        }},
 
-            const date = param.time;
-            const candle = candleMap.get(date);
+        timeScale: {{
+            timeVisible:true,
+        }},
 
-            if (!candle) {{
-                tooltip.style.display = 'none';
-                return;
+        handleScale: {{
+            mouseWheel:false,
+            pinch:true,
+            axisPressedMouseMove:{{
+                time:true,
+                price:true
             }}
+        }},
 
-            tooltip.innerHTML =
-                '<b>' + date + '</b><br>' +
-                '시가: ' + Math.round(candle.open).toLocaleString() + '<br>' +
-                '고가: ' + Math.round(candle.high).toLocaleString() + '<br>' +
-                '저가: ' + Math.round(candle.low).toLocaleString() + '<br>' +
-                '종가: ' + Math.round(candle.close).toLocaleString();
+        handleScroll: {{
+            mouseWheel:true,
+            pressedMouseMove:true,
+            horzTouchDrag:true,
+            vertTouchDrag:true,
+        }},
+    }}
+);
 
-            tooltip.style.display = 'block';
+const candleSeries = chart.addCandlestickSeries({{
+    upColor:'#FF3333',
+    downColor:'#1E5BFF',
+    borderUpColor:'#FF3333',
+    borderDownColor:'#1E5BFF',
+    wickUpColor:'#FF3333',
+    wickDownColor:'#1E5BFF',
 
-            let left = param.point.x + 20;
-            let top = param.point.y + 20;
+    priceFormat:{{
+        type:'price',
+        precision:0,
+        minMove:1
+    }}
+}});
 
-            if (left > chartElement.clientWidth - 160) {{
-                left = param.point.x - 150;
-            }}
+candleSeries.setData(candles);
 
-            tooltip.style.left = left + 'px';
-            tooltip.style.top = top + 'px';
-        }});
+function addLine(data, color) {{
 
-        function drawMonthLines() {{
-            monthLinesLayer.innerHTML = '';
+    const line = chart.addLineSeries({{
+        color:color,
+        lineWidth:2,
+        priceLineVisible:false,
+        lastValueVisible:false,
+    }});
 
-            let previousMonth = '';
+    line.setData(data);
+}}
 
-            candles.forEach(function(item) {{
-                const currentMonth = item.time.substring(0, 7);
+addLine(ma5, 'white');
+addLine(ma20, 'red');
+addLine(ma60, 'limegreen');
+addLine(ma120, 'dodgerblue');
+addLine(ma240, 'pink');
 
-                if (currentMonth !== previousMonth) {{
-                    const x = chart.timeScale().timeToCoordinate(item.time);
+chart.timeScale().fitContent();
 
-                    if (x !== null) {{
-                        const barSpacing = chart.timeScale().options().barSpacing || 6;
-                        const adjustedX = x - (barSpacing / 2);
+window.addEventListener('resize', () => {{
+    chart.applyOptions({{
+        width: document.getElementById('chart').clientWidth
+    }});
+}});
 
-                        if (adjustedX >= 0 && adjustedX <= chartElement.clientWidth) {{
-                            const line = document.createElement('div');
-                            line.className = 'month-line';
-                            line.style.left = adjustedX + 'px';
-                            monthLinesLayer.appendChild(line);
-                        }}
-                    }}
+</script>
 
-                    previousMonth = currentMonth;
-                }}
-            }});
-        }}
-
-        function drawBandBox(band) {{
-            const x1 = chart.timeScale().timeToCoordinate(band.start);
-            const x2 = chart.timeScale().timeToCoordinate(band.end);
-
-            const yOpen = candleSeries.priceToCoordinate(band.open);
-            const yClose = candleSeries.priceToCoordinate(band.close);
-
-            if (x1 === null || x2 === null || yOpen === null || yClose === null) {{
-                return;
-            }}
-
-            const barSpacing = chart.timeScale().options().barSpacing || 6;
-            const left = Math.min(x1, x2) - (barSpacing / 2);
-            const width = Math.max(12, Math.abs(x2 - x1) + barSpacing);
-
-            const top = Math.min(yOpen, yClose);
-            const height = Math.max(2, Math.abs(yClose - yOpen));
-
-            const box = document.createElement('div');
-
-            if (band.up) {{
-                box.className = 'double-month-band double-month-up';
-            }} else {{
-                box.className = 'double-month-band double-month-down';
-            }}
-
-            box.style.left = left + 'px';
-            box.style.width = width + 'px';
-            box.style.top = top + 'px';
-            box.style.height = height + 'px';
-
-            doubleMonthLayer.appendChild(box);
-        }}
-
-        function drawMonthlyDoubleBands() {{
-            doubleMonthLayer.innerHTML = '';
-
-            if (doubleMode === 0) {{
-                return;
-            }}
-
-            const bandsToDraw = doubleMode === 1
-                ? monthlyDoubleBands
-                : mergedDoubleBands;
-
-            bandsToDraw.forEach(function(band) {{
-                drawBandBox(band);
-            }});
-        }}
-
-        function redrawOverlays() {{
-            drawMonthLines();
-            drawMonthlyDoubleBands();
-        }}
-
-        doubleToggle.addEventListener('click', function() {{
-            doubleMode = (doubleMode + 1) % 3;
-
-            doubleToggle.classList.remove('mode1');
-            doubleToggle.classList.remove('mode2');
-
-            if (doubleMode === 1) {{
-                doubleToggle.classList.add('mode1');
-                doubleToggle.innerText = 'Double';
-            }} else if (doubleMode === 2) {{
-                doubleToggle.classList.add('mode2');
-                doubleToggle.innerText = 'Double 2';
-            }} else {{
-                doubleToggle.innerText = 'Double';
-            }}
-
-            redrawOverlays();
-        }});
-
-        chart.timeScale().subscribeVisibleTimeRangeChange(function() {{
-            redrawOverlays();
-        }});
-
-        chart.timeScale().fitContent();
-
-        setTimeout(function() {{
-            redrawOverlays();
-        }}, 300);
-
-        window.addEventListener('resize', function() {{
-            const newHeight = window.innerWidth <= 768 ? 520 : 620;
-
-            chart.applyOptions({{
-                width: chartElement.clientWidth,
-                height: newHeight
-            }});
-
-            redrawOverlays();
-        }});
-    </script>
 </body>
 </html>
 """
 
-components.html(html, height=660, scrolling=False)
+components.html(
+    html,
+    height=660,
+    scrolling=False
+)
+
+# =========================
+# 현재 상태
+# =========================
 
 latest = data.dropna().iloc[-1]
 
