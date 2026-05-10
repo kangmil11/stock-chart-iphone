@@ -454,7 +454,7 @@ html = f"""
         const doubleMonthLayer = document.getElementById('double-month-bands');
         const doubleToggle = document.getElementById('double-toggle');
 
-        const chartHeight = window.innerWidth <= 768 ? 430 : 620;
+        const chartHeight = window.innerWidth <= 768 ? 520 : 620;
 
         let doubleMode = 0;
 
@@ -492,7 +492,7 @@ html = f"""
                 timeVisible: true,
                 secondsVisible: false,
 
-                rightOffset: 12,
+                rightOffset: 18,
             }},
 
             crosshair: {{
@@ -729,7 +729,7 @@ html = f"""
 """
 
 
-components.html(html, height=470, scrolling=False)
+components.html(html, height=660, scrolling=False)
 
 
 latest = data.dropna().iloc[-1]
