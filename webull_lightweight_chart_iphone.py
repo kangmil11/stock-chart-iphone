@@ -492,7 +492,7 @@ html = f"""
                 timeVisible: true,
                 secondsVisible: false,
 
-                rightOffset: 18,
+                rightOffset: 30,
             }},
 
             crosshair: {{
