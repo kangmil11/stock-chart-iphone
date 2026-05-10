@@ -291,7 +291,7 @@ html = f"""
     <script src="https://unpkg.com/lightweight-charts@4.1.1/dist/lightweight-charts.standalone.production.js"></script>
 
     <style>
-        body {{
+        html, body {{
             margin: 0;
             background: white;
             color: white;
