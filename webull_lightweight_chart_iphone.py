@@ -17,11 +17,11 @@ st.title("Webull 스타일 주식 차트")
 st.markdown(
     """
     <style>
-    @media (max-width: 738px) {
+    @media (max-width: 638px) {
         #chart {
             height: 430px;
-            width: calc(100% - 32px);
-            margin-right: 32px;
+            width: calc(100% - 64px);
+            margin-right: 64px;
             touch-action: none;
         }
     }
