@@ -101,7 +101,7 @@ def resolve_ticker(user_input):
         "다우": "^DJI",
         "KODEX200": "069500.KS",
         "KODEX 200": "069500.KS",
-        "KODEX레버리지: "122630.KS",
+        "KODEX레버리지": "122630.KS",
     }
 
     key = user_input.upper().replace(" ", "")
