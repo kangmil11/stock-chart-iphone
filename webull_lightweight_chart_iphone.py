@@ -48,7 +48,6 @@ st.markdown(
 @st.cache_data(ttl=86400)
 def get_kr_stock_name_map():
     url = "https://kind.krx.co.kr/corpgeneral/corpList.do?method=download&searchType=13"
-
     headers = {"User-Agent": "Mozilla/5.0"}
 
     response = requests.get(url, headers=headers, timeout=10)
@@ -349,6 +348,44 @@ if interval_label == "일봉":
         })
 
 
+# Big 마커 데이터 생성
+# MA60 < MA240 이었다가 MA60 >= MA240 : 빅골드
+# MA60 > MA240 이었다가 MA60 <= MA240 : 빅데드
+big_markers = []
+
+if interval_label == "일봉":
+    big_data = data.dropna(subset=["MA60", "MA240"]).copy()
+
+    for i in range(1, len(big_data)):
+        prev = big_data.iloc[i - 1]
+        curr = big_data.iloc[i]
+
+        prev_ma60 = float(prev["MA60"])
+        prev_ma240 = float(prev["MA240"])
+        curr_ma60 = float(curr["MA60"])
+        curr_ma240 = float(curr["MA240"])
+
+        time = curr["time"]
+
+        if prev_ma60 < prev_ma240 and curr_ma60 >= curr_ma240:
+            big_markers.append({
+                "time": time,
+                "position": "belowBar",
+                "color": "#ff3333",
+                "shape": "arrowUp",
+                "text": "빅골드"
+            })
+
+        elif prev_ma60 > prev_ma240 and curr_ma60 <= curr_ma240:
+            big_markers.append({
+                "time": time,
+                "position": "aboveBar",
+                "color": "#1E5BFF",
+                "shape": "arrowDown",
+                "text": "빅데드"
+            })
+
+
 html = f"""
 <!DOCTYPE html>
 <html>
@@ -514,6 +551,7 @@ html = f"""
             <span style="color:#f000ff">MA240</span>
             <button id="double-toggle" class="double-btn" type="button">Double</button>
             <button id="wave-toggle" class="double-btn" type="button">Wave</button>
+            <button id="big-toggle" class="double-btn" type="button">Big</button>
         </div>
 
         <div id="tooltip" class="tooltip"></div>
@@ -524,6 +562,7 @@ html = f"""
         const monthlyDoubleBands = {json.dumps(monthly_double_bands)};
         const mergedDoubleBands = {json.dumps(merged_double_bands)};
         const waveBands = {json.dumps(wave_bands)};
+        const bigMarkers = {json.dumps(big_markers)};
 
         const ma5 = {json.dumps(ma5)};
         const ma20 = {json.dumps(ma20)};
@@ -539,11 +578,13 @@ html = f"""
 
         const doubleToggle = document.getElementById('double-toggle');
         const waveToggle = document.getElementById('wave-toggle');
+        const bigToggle = document.getElementById('big-toggle');
 
         const chartHeight = window.innerWidth <= 768 ? 520 : 620;
 
         let doubleMode = 0;
         let waveMode = false;
+        let bigMode = false;
 
         const chart = LightweightCharts.createChart(chartElement, {{
             width: chartElement.clientWidth,
@@ -860,6 +901,18 @@ html = f"""
             }}
 
             redrawOverlays();
+        }});
+
+        bigToggle.addEventListener('click', function() {{
+            bigMode = !bigMode;
+
+            if (bigMode) {{
+                bigToggle.classList.add('mode2');
+                candleSeries.setMarkers(bigMarkers);
+            }} else {{
+                bigToggle.classList.remove('mode2');
+                candleSeries.setMarkers([]);
+            }}
         }});
 
         chart.timeScale().subscribeVisibleTimeRangeChange(function() {{
