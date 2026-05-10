@@ -440,7 +440,7 @@ html = f"""
             <span style="color:red">MA20</span>
             <span style="color:limegreen">MA60</span>
             <span style="color:dodgerblue">MA120</span>
-            <span style="color:pink">MA240</span>
+            <span style="color:#f000ff">MA240</span>
             <button id="double-toggle" class="double-btn" type="button">Double</button>
         </div>
 
@@ -569,7 +569,7 @@ html = f"""
         addLine(ma20, 'red');
         addLine(ma60, 'limegreen');
         addLine(ma120, 'dodgerblue');
-        addLine(ma240, 'pink');
+        addLine(ma240, '#f000ff');
 
         const candleMap = new Map();
 
