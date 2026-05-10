@@ -293,8 +293,8 @@ html = f"""
     <style>
         html, body {{
             margin: 0;
-            background: #0b0f14;
-            color: white;
+            background: #444444;
+            color: 444444;
             font-family: Arial, sans-serif;
         }}
 
@@ -312,7 +312,7 @@ html = f"""
             #chart {{
                 height: 520px;
                 width: calc(100% - 18px);
-                background: white;
+                background: 444444;
                 touch-action: none;
             }}
 
