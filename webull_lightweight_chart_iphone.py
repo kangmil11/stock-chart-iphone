@@ -521,30 +521,85 @@ html = f"""
 
         .big-marker {{
             position: absolute;
-            transform: translate(-50%, -50%);
             pointer-events: none;
             text-align: center;
             font-weight: bold;
             white-space: nowrap;
-            text-shadow: 0 1px 3px rgba(0,0,0,0.9);
+            text-shadow: 0 1px 3px rgba(0,0,0,0.95);
         }}
 
         .big-marker.gold {{
-            color: #ff3333;
+            color: #ff0000;
+            transform: translate(-50%, 5px);
         }}
 
         .big-marker.dead {{
-            color: #1E5BFF;
+            color: #0048ff;
+            transform: translate(-50%, calc(-100% - 5px));
         }}
 
-        .big-arrow {{
-            font-size: 22px;
-            line-height: 18px;
+        .big-arrow-shape {{
+            position: relative;
+            width: 14px;
+            height: 18px;
+            margin: 0 auto;
+        }}
+
+        .big-arrow-shape.up::before {{
+            content: "";
+            position: absolute;
+            left: 4px;
+            top: 7px;
+            width: 6px;
+            height: 11px;
+            background: #ff0000;
+        }}
+
+        .big-arrow-shape.up::after {{
+            content: "";
+            position: absolute;
+            left: 0;
+            top: 0;
+            width: 0;
+            height: 0;
+            border-left: 7px solid transparent;
+            border-right: 7px solid transparent;
+            border-bottom: 8px solid #ff0000;
+        }}
+
+        .big-arrow-shape.down::before {{
+            content: "";
+            position: absolute;
+            left: 4px;
+            top: 0;
+            width: 6px;
+            height: 11px;
+            background: #0048ff;
+        }}
+
+        .big-arrow-shape.down::after {{
+            content: "";
+            position: absolute;
+            left: 0;
+            top: 10px;
+            width: 0;
+            height: 0;
+            border-left: 7px solid transparent;
+            border-right: 7px solid transparent;
+            border-top: 8px solid #0048ff;
         }}
 
         .big-text {{
-            font-size: 12px;
-            line-height: 14px;
+            font-size: 11px;
+            line-height: 12px;
+        }}
+
+        .big-marker.gold .big-text {{
+            margin-top: 1px;
+        }}
+
+        .big-marker.dead .big-text {{
+            margin-bottom: 1px;
         }}
 
         .tooltip {{
@@ -914,13 +969,13 @@ html = f"""
                 if (signal.type === 'gold') {{
                     marker.className = 'big-marker gold';
                     marker.innerHTML =
-                        '<div class="big-arrow">▲</div>' +
+                        '<div class="big-arrow-shape up"></div>' +
                         '<div class="big-text">빅골드</div>';
                 }} else {{
                     marker.className = 'big-marker dead';
                     marker.innerHTML =
                         '<div class="big-text">빅데드</div>' +
-                        '<div class="big-arrow">▼</div>';
+                        '<div class="big-arrow-shape down"></div>';
                 }}
 
                 marker.style.left = x + 'px';
