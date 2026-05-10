@@ -49,9 +49,7 @@ st.markdown(
 def get_kr_stock_name_map():
     url = "https://kind.krx.co.kr/corpgeneral/corpList.do?method=download&searchType=13"
 
-    headers = {
-        "User-Agent": "Mozilla/5.0"
-    }
+    headers = {"User-Agent": "Mozilla/5.0"}
 
     response = requests.get(url, headers=headers, timeout=10)
     response.raise_for_status()
@@ -307,8 +305,8 @@ ma240 = make_line("MA240")
 
 
 # Wave 영역 데이터 생성
-# 일봉 기준 MA240 > MA120: 빨간색
-# 일봉 기준 MA240 < MA120: 파란색
+# MA240 > MA120 : 파란색 반투명
+# MA240 < MA120 : 빨간색 반투명
 wave_bands = []
 
 if interval_label == "일봉":
@@ -316,9 +314,9 @@ if interval_label == "일봉":
 
     for _, row in data.dropna(subset=["MA120", "MA240"]).iterrows():
         if row["MA240"] > row["MA120"]:
-            state = "red"
-        elif row["MA240"] < row["MA120"]:
             state = "blue"
+        elif row["MA240"] < row["MA120"]:
+            state = "red"
         else:
             state = "neutral"
 
@@ -814,10 +812,10 @@ html = f"""
                 const polygon = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
                 polygon.setAttribute('points', polygonPoints);
 
-                if (band.state === 'red') {{
-                    polygon.setAttribute('fill', 'rgba(255, 0, 0, 0.18)');
-                }} else {{
+                if (band.state === 'blue') {{
                     polygon.setAttribute('fill', 'rgba(0, 80, 255, 0.18)');
+                }} else {{
+                    polygon.setAttribute('fill', 'rgba(255, 0, 0, 0.18)');
                 }}
 
                 polygon.setAttribute('stroke', 'none');
