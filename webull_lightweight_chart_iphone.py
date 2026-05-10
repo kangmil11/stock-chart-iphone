@@ -104,12 +104,13 @@ def resolve_ticker(user_input):
         "다우": "^DJI",
         "KODEX200": "069500.KS",
         "KODEX 200": "069500.KS",
-        }
+    }
 
     key = user_input.upper().replace(" ", "")
+    
     for name, symbol in index_map.items():
-    if key == name.upper().replace(" ", ""):
-        return symbol
+        if key == name.upper().replace(" ", ""):
+            return symbol
 
     if "." in user_input:
         return user_input.upper()
