@@ -18,6 +18,13 @@ st.markdown(
     """
     <style>
     @media (max-width: 768px) {
+        #chart {
+            height: 430px;
+            width: calc(100% - 32px);
+            margin-right: 32px;
+            touch-action: none;
+        }
+    }
         h1 {
             font-size: 24px !important;
         }
@@ -492,7 +499,7 @@ html = f"""
                 timeVisible: true,
                 secondsVisible: false,
 
-                rightOffset: 30,
+                rightOffset: 10,
             }},
 
             crosshair: {{
