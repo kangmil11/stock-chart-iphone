@@ -305,9 +305,6 @@ ma120 = make_line("MA120")
 ma240 = make_line("MA240")
 
 
-# Wave 영역 데이터 생성
-# MA240 > MA120 : 파란색 반투명
-# MA240 < MA120 : 빨간색 반투명
 wave_bands = []
 
 if interval_label == "일봉":
@@ -350,10 +347,7 @@ if interval_label == "일봉":
         })
 
 
-# Big 마커 데이터 생성
-# MA60 < MA240 이었다가 MA60 >= MA240 : 빅골드
-# MA60 > MA240 이었다가 MA60 <= MA240 : 빅데드
-big_markers = []
+big_signals = []
 
 if interval_label == "일봉":
     big_data = data.dropna(subset=["MA60", "MA240"]).copy()
@@ -368,23 +362,20 @@ if interval_label == "일봉":
         curr_ma240 = float(curr["MA240"])
 
         time = curr["time"]
+        cross_price = (curr_ma60 + curr_ma240) / 2
 
         if prev_ma60 < prev_ma240 and curr_ma60 >= curr_ma240:
-            big_markers.append({
+            big_signals.append({
                 "time": time,
-                "position": "belowBar",
-                "color": "#ff3333",
-                "shape": "arrowUp",
-                "text": "빅골드"
+                "price": round(cross_price, 2),
+                "type": "gold"
             })
 
         elif prev_ma60 > prev_ma240 and curr_ma60 <= curr_ma240:
-            big_markers.append({
+            big_signals.append({
                 "time": time,
-                "position": "aboveBar",
-                "color": "#1E5BFF",
-                "shape": "arrowDown",
-                "text": "빅데드"
+                "price": round(cross_price, 2),
+                "type": "dead"
             })
 
 
@@ -444,6 +435,7 @@ html = f"""
 
         #wave-bands,
         #double-month-bands,
+        #big-markers,
         #month-lines {{
             position: absolute;
             top: 0;
@@ -459,6 +451,10 @@ html = f"""
 
         #double-month-bands {{
             z-index: 6;
+        }}
+
+        #big-markers {{
+            z-index: 12;
         }}
 
         #month-lines {{
@@ -523,6 +519,34 @@ html = f"""
             background: rgba(255, 200, 0, 0.35);
         }}
 
+        .big-marker {{
+            position: absolute;
+            transform: translate(-50%, -50%);
+            pointer-events: none;
+            text-align: center;
+            font-weight: bold;
+            white-space: nowrap;
+            text-shadow: 0 1px 3px rgba(0,0,0,0.9);
+        }}
+
+        .big-marker.gold {{
+            color: #ff3333;
+        }}
+
+        .big-marker.dead {{
+            color: #1E5BFF;
+        }}
+
+        .big-arrow {{
+            font-size: 22px;
+            line-height: 18px;
+        }}
+
+        .big-text {{
+            font-size: 12px;
+            line-height: 14px;
+        }}
+
         .tooltip {{
             position: absolute;
             display: none;
@@ -543,6 +567,7 @@ html = f"""
     <div id="chart">
         <div id="wave-bands"></div>
         <div id="double-month-bands"></div>
+        <div id="big-markers"></div>
         <div id="month-lines"></div>
 
         <div class="ma-legend">
@@ -564,7 +589,7 @@ html = f"""
         const monthlyDoubleBands = {json.dumps(monthly_double_bands)};
         const mergedDoubleBands = {json.dumps(merged_double_bands)};
         const waveBands = {json.dumps(wave_bands)};
-        const bigMarkers = {json.dumps(big_markers)};
+        const bigSignals = {json.dumps(big_signals)};
 
         const ma5 = {json.dumps(ma5)};
         const ma20 = {json.dumps(ma20)};
@@ -577,6 +602,7 @@ html = f"""
         const monthLinesLayer = document.getElementById('month-lines');
         const doubleMonthLayer = document.getElementById('double-month-bands');
         const waveLayer = document.getElementById('wave-bands');
+        const bigLayer = document.getElementById('big-markers');
 
         const doubleToggle = document.getElementById('double-toggle');
         const waveToggle = document.getElementById('wave-toggle');
@@ -868,8 +894,45 @@ html = f"""
             }});
         }}
 
+        function drawBigSignals() {{
+            bigLayer.innerHTML = '';
+
+            if (!bigMode) {{
+                return;
+            }}
+
+            bigSignals.forEach(function(signal) {{
+                const x = chart.timeScale().timeToCoordinate(signal.time);
+                const y = candleSeries.priceToCoordinate(signal.price);
+
+                if (x === null || y === null) {{
+                    return;
+                }}
+
+                const marker = document.createElement('div');
+
+                if (signal.type === 'gold') {{
+                    marker.className = 'big-marker gold';
+                    marker.innerHTML =
+                        '<div class="big-arrow">▲</div>' +
+                        '<div class="big-text">빅골드</div>';
+                }} else {{
+                    marker.className = 'big-marker dead';
+                    marker.innerHTML =
+                        '<div class="big-text">빅데드</div>' +
+                        '<div class="big-arrow">▼</div>';
+                }}
+
+                marker.style.left = x + 'px';
+                marker.style.top = y + 'px';
+
+                bigLayer.appendChild(marker);
+            }});
+        }}
+
         function redrawOverlays() {{
             drawWaveBands();
+            drawBigSignals();
             drawMonthLines();
             drawMonthlyDoubleBands();
         }}
@@ -910,11 +973,11 @@ html = f"""
 
             if (bigMode) {{
                 bigToggle.classList.add('mode2');
-                candleSeries.setMarkers(bigMarkers);
             }} else {{
                 bigToggle.classList.remove('mode2');
-                candleSeries.setMarkers([]);
             }}
+
+            redrawOverlays();
         }});
 
         chart.timeScale().subscribeVisibleTimeRangeChange(function() {{
