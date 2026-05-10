@@ -1,13 +1,13 @@
-# webull_lightweight_chart.py
+# webull_lightweight_chart_iphone.py
 
 import json
-from datetime import datetime
+import requests
+from io import BytesIO
 
 import streamlit as st
 import yfinance as yf
 import pandas as pd
 import streamlit.components.v1 as components
-from pykrx import stock
 
 
 st.set_page_config(page_title="Webull Style Chart", layout="wide")
@@ -40,22 +40,41 @@ st.markdown(
 
 @st.cache_data(ttl=86400)
 def get_kr_stock_name_map():
-    today = datetime.today().strftime("%Y%m%d")
+    url = "https://kind.krx.co.kr/corpgeneral/corpList.do?method=download&searchType=13"
 
-    kospi = stock.get_market_ticker_list(today, market="KOSPI")
-    kosdaq = stock.get_market_ticker_list(today, market="KOSDAQ")
+    headers = {
+        "User-Agent": "Mozilla/5.0"
+    }
+
+    response = requests.get(url, headers=headers, timeout=10)
+    response.raise_for_status()
+
+    df = pd.read_html(BytesIO(response.content), header=0)[0]
+    df["종목코드"] = df["종목코드"].astype(str).str.zfill(6)
 
     name_map = {}
 
-    for code in kospi:
-        name = stock.get_market_ticker_name(code)
-        name_map[name] = f"{code}.KS"
-
-    for code in kosdaq:
-        name = stock.get_market_ticker_name(code)
-        name_map[name] = f"{code}.KQ"
+    for _, row in df.iterrows():
+        name = str(row["회사명"]).strip()
+        code = str(row["종목코드"]).strip()
+        name_map[name] = code
 
     return name_map
+
+
+@st.cache_data(ttl=3600)
+def test_yfinance_ticker(ticker):
+    try:
+        test_data = yf.download(
+            ticker,
+            period="5d",
+            interval="1d",
+            auto_adjust=True,
+            progress=False
+        )
+        return not test_data.empty
+    except Exception:
+        return False
 
 
 def resolve_ticker(user_input):
@@ -68,12 +87,24 @@ def resolve_ticker(user_input):
         return user_input.upper()
 
     if user_input.isdigit() and len(user_input) == 6:
-        return f"{user_input}.KS"
+        ks_ticker = f"{user_input}.KS"
+        kq_ticker = f"{user_input}.KQ"
+
+        if test_yfinance_ticker(ks_ticker):
+            return ks_ticker
+        return kq_ticker
 
     name_map = get_kr_stock_name_map()
 
     if user_input in name_map:
-        return name_map[user_input]
+        code = name_map[user_input]
+
+        ks_ticker = f"{code}.KS"
+        kq_ticker = f"{code}.KQ"
+
+        if test_yfinance_ticker(ks_ticker):
+            return ks_ticker
+        return kq_ticker
 
     matches = [
         (name, code)
@@ -82,14 +113,29 @@ def resolve_ticker(user_input):
     ]
 
     if len(matches) == 1:
-        return matches[0][1]
+        code = matches[0][1]
+
+        ks_ticker = f"{code}.KS"
+        kq_ticker = f"{code}.KQ"
+
+        if test_yfinance_ticker(ks_ticker):
+            return ks_ticker
+        return kq_ticker
 
     if len(matches) > 1:
         selected_name = st.selectbox(
             "검색 결과가 여러 개입니다. 종목을 선택해주세요.",
             [name for name, code in matches]
         )
-        return dict(matches)[selected_name]
+
+        code = dict(matches)[selected_name]
+
+        ks_ticker = f"{code}.KS"
+        kq_ticker = f"{code}.KQ"
+
+        if test_yfinance_ticker(ks_ticker):
+            return ks_ticker
+        return kq_ticker
 
     return user_input.upper()
 
@@ -685,7 +731,6 @@ components.html(html, height=660, scrolling=False)
 
 
 latest = data.dropna().iloc[-1]
-
 
 st.subheader("현재 상태")
 
