@@ -25,19 +25,19 @@ st.markdown(
             touch-action: none;
         }
     }
-        h1 {
-            font-size: 24px !important;
-        }
 
-        .block-container {
-            padding-left: 0.6rem !important;
-            padding-right: 0.6rem !important;
-            padding-top: 1rem !important;
-        }
+    h1 {
+        font-size: 24px !important;
+    }
 
-        div[data-testid="stMetric"] {
-            padding: 4px 0;
-        }
+    .block-container {
+        padding-left: 0.6rem !important;
+        padding-right: 0.6rem !important;
+        padding-top: 1rem !important;
+    }
+
+    div[data-testid="stMetric"] {
+        padding: 4px 0;
     }
     </style>
     """,
@@ -107,7 +107,7 @@ def resolve_ticker(user_input):
     }
 
     key = user_input.upper().replace(" ", "")
-    
+
     for name, symbol in index_map.items():
         if key == name.upper().replace(" ", ""):
             return symbol
@@ -306,6 +306,51 @@ ma120 = make_line("MA120")
 ma240 = make_line("MA240")
 
 
+# Wave 영역 데이터 생성
+# 일봉 기준 MA240 > MA120: 빨간색
+# 일봉 기준 MA240 < MA120: 파란색
+wave_bands = []
+
+if interval_label == "일봉":
+    wave_points = []
+
+    for _, row in data.dropna(subset=["MA120", "MA240"]).iterrows():
+        if row["MA240"] > row["MA120"]:
+            state = "red"
+        elif row["MA240"] < row["MA120"]:
+            state = "blue"
+        else:
+            state = "neutral"
+
+        wave_points.append({
+            "time": row["time"],
+            "ma120": round(float(row["MA120"]), 2),
+            "ma240": round(float(row["MA240"]), 2),
+            "state": state
+        })
+
+    current_band = []
+
+    for point in wave_points:
+        if not current_band:
+            current_band = [point]
+        elif current_band[-1]["state"] == point["state"]:
+            current_band.append(point)
+        else:
+            if len(current_band) >= 2 and current_band[0]["state"] != "neutral":
+                wave_bands.append({
+                    "state": current_band[0]["state"],
+                    "points": current_band
+                })
+            current_band = [point]
+
+    if len(current_band) >= 2 and current_band[0]["state"] != "neutral":
+        wave_bands.append({
+            "state": current_band[0]["state"],
+            "points": current_band
+        })
+
+
 html = f"""
 <!DOCTYPE html>
 <html>
@@ -316,7 +361,7 @@ html = f"""
         html, body {{
             margin: 0;
             background: #444444;
-            color: 444444;
+            color: #444444;
             font-family: Arial, sans-serif;
         }}
 
@@ -334,7 +379,7 @@ html = f"""
             #chart {{
                 height: 520px;
                 width: calc(100% - 18px);
-                background: 444444;
+                background: #0b0f14;
                 touch-action: none;
             }}
 
@@ -360,6 +405,7 @@ html = f"""
             }}
         }}
 
+        #wave-bands,
         #double-month-bands,
         #month-lines {{
             position: absolute;
@@ -368,6 +414,10 @@ html = f"""
             right: 0;
             bottom: 0;
             pointer-events: none;
+        }}
+
+        #wave-bands {{
+            z-index: 5;
         }}
 
         #double-month-bands {{
@@ -454,6 +504,7 @@ html = f"""
 
 <body>
     <div id="chart">
+        <div id="wave-bands"></div>
         <div id="double-month-bands"></div>
         <div id="month-lines"></div>
 
@@ -464,6 +515,7 @@ html = f"""
             <span style="color:dodgerblue">MA120</span>
             <span style="color:#f000ff">MA240</span>
             <button id="double-toggle" class="double-btn" type="button">Double</button>
+            <button id="wave-toggle" class="double-btn" type="button">Wave</button>
         </div>
 
         <div id="tooltip" class="tooltip"></div>
@@ -473,6 +525,7 @@ html = f"""
         const candles = {json.dumps(candles)};
         const monthlyDoubleBands = {json.dumps(monthly_double_bands)};
         const mergedDoubleBands = {json.dumps(merged_double_bands)};
+        const waveBands = {json.dumps(wave_bands)};
 
         const ma5 = {json.dumps(ma5)};
         const ma20 = {json.dumps(ma20)};
@@ -484,11 +537,15 @@ html = f"""
         const tooltip = document.getElementById('tooltip');
         const monthLinesLayer = document.getElementById('month-lines');
         const doubleMonthLayer = document.getElementById('double-month-bands');
+        const waveLayer = document.getElementById('wave-bands');
+
         const doubleToggle = document.getElementById('double-toggle');
+        const waveToggle = document.getElementById('wave-toggle');
 
         const chartHeight = window.innerWidth <= 768 ? 520 : 620;
 
         let doubleMode = 0;
+        let waveMode = false;
 
         const chart = LightweightCharts.createChart(chartElement, {{
             width: chartElement.clientWidth,
@@ -523,7 +580,6 @@ html = f"""
                 borderColor: 'rgba(255,255,255,0.2)',
                 timeVisible: true,
                 secondsVisible: false,
-
                 rightOffset: 10,
             }},
 
@@ -711,7 +767,68 @@ html = f"""
             }});
         }}
 
+        function drawWaveBands() {{
+            waveLayer.innerHTML = '';
+
+            if (!waveMode) {{
+                return;
+            }}
+
+            waveBands.forEach(function(band) {{
+                const topPoints = [];
+                const bottomPoints = [];
+
+                band.points.forEach(function(point) {{
+                    const x = chart.timeScale().timeToCoordinate(point.time);
+
+                    const y240 = candleSeries.priceToCoordinate(point.ma240);
+                    const y120 = candleSeries.priceToCoordinate(point.ma120);
+
+                    if (x === null || y240 === null || y120 === null) {{
+                        return;
+                    }}
+
+                    topPoints.push([x, y240]);
+                    bottomPoints.push([x, y120]);
+                }});
+
+                if (topPoints.length < 2 || bottomPoints.length < 2) {{
+                    return;
+                }}
+
+                const polygonPoints = topPoints
+                    .concat(bottomPoints.reverse())
+                    .map(function(p) {{
+                        return p[0] + ',' + p[1];
+                    }})
+                    .join(' ');
+
+                const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+                svg.style.position = 'absolute';
+                svg.style.left = '0';
+                svg.style.top = '0';
+                svg.style.width = '100%';
+                svg.style.height = '100%';
+                svg.style.overflow = 'visible';
+
+                const polygon = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
+                polygon.setAttribute('points', polygonPoints);
+
+                if (band.state === 'red') {{
+                    polygon.setAttribute('fill', 'rgba(255, 0, 0, 0.18)');
+                }} else {{
+                    polygon.setAttribute('fill', 'rgba(0, 80, 255, 0.18)');
+                }}
+
+                polygon.setAttribute('stroke', 'none');
+
+                svg.appendChild(polygon);
+                waveLayer.appendChild(svg);
+            }});
+        }}
+
         function redrawOverlays() {{
+            drawWaveBands();
             drawMonthLines();
             drawMonthlyDoubleBands();
         }}
@@ -730,6 +847,18 @@ html = f"""
                 doubleToggle.innerText = 'Double 2';
             }} else {{
                 doubleToggle.innerText = 'Double';
+            }}
+
+            redrawOverlays();
+        }});
+
+        waveToggle.addEventListener('click', function() {{
+            waveMode = !waveMode;
+
+            if (waveMode) {{
+                waveToggle.classList.add('mode2');
+            }} else {{
+                waveToggle.classList.remove('mode2');
             }}
 
             redrawOverlays();
