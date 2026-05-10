@@ -293,7 +293,7 @@ html = f"""
     <style>
         html, body {{
             margin: 0;
-            background: white;
+            background: #0b0f14;
             color: white;
             font-family: Arial, sans-serif;
         }}
