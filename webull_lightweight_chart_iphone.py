@@ -90,6 +90,27 @@ def resolve_ticker(user_input):
     if not user_input:
         return "005930.KS"
 
+    index_map = {
+        "KOSPI": "^KS11",
+        "코스피": "^KS11",
+        "KOSDAQ": "^KQ11",
+        "코스닥": "^KQ11",
+        "SPX": "^GSPC",
+        "S&P500": "^GSPC",
+        "S&P 500": "^GSPC",
+        "NASDAQ": "^IXIC",
+        "나스닥": "^IXIC",
+        "DOW": "^DJI",
+        "다우": "^DJI",
+        "KODEX200": "069500.KS",
+        "KODEX 200": "069500.KS",
+        }
+
+    key = user_input.upper().replace(" ", "")
+    for name, symbol in index_map.items():
+    if key == name.upper().replace(" ", ""):
+        return symbol
+
     if "." in user_input:
         return user_input.upper()
 
