@@ -312,7 +312,7 @@ html = f"""
             #chart {{
                 height: 520px;
                 width: calc(100% - 18px);
-                background: #0b0f14;
+                background: white;
                 touch-action: none;
             }}
 
