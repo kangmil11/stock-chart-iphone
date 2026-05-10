@@ -17,11 +17,11 @@ st.title("Webull 스타일 주식 차트")
 st.markdown(
     """
     <style>
-    @media (max-width: 638px) {
+    @media (max-width: 768px) {
         #chart {
             height: 430px;
-            width: calc(100% - 64px);
-            margin-right: 64px;
+            width: calc(100% - 32px);
+            margin-right: 32px;
             touch-action: none;
         }
     }
@@ -293,15 +293,16 @@ html = f"""
     <style>
         body {{
             margin: 0;
-            background: #0b0f14;
+            background: white;
             color: white;
             font-family: Arial, sans-serif;
         }}
 
         #chart {{
-            width: 100%;
+            width: calc(100% - 36px);
             height: 620px;
             position: relative;
+            background: #0b0f14;
             touch-action: none;
             -webkit-user-select: none;
             user-select: none;
@@ -310,6 +311,8 @@ html = f"""
         @media (max-width: 768px) {{
             #chart {{
                 height: 520px;
+                width: calc(100% - 44px);
+                background: #0b0f14;
                 touch-action: none;
             }}
 
