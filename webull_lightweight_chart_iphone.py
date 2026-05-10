@@ -1,13 +1,18 @@
 # webull_lightweight_chart.py
 
 import json
+from datetime import datetime
+
 import streamlit as st
 import yfinance as yf
 import pandas as pd
 import streamlit.components.v1 as components
+from pykrx import stock
+
 
 st.set_page_config(page_title="Webull Style Chart", layout="wide")
 st.title("Webull 스타일 주식 차트")
+
 
 st.markdown(
     """
@@ -32,10 +37,67 @@ st.markdown(
     unsafe_allow_html=True
 )
 
+
+@st.cache_data(ttl=86400)
+def get_kr_stock_name_map():
+    today = datetime.today().strftime("%Y%m%d")
+
+    kospi = stock.get_market_ticker_list(today, market="KOSPI")
+    kosdaq = stock.get_market_ticker_list(today, market="KOSDAQ")
+
+    name_map = {}
+
+    for code in kospi:
+        name = stock.get_market_ticker_name(code)
+        name_map[name] = f"{code}.KS"
+
+    for code in kosdaq:
+        name = stock.get_market_ticker_name(code)
+        name_map[name] = f"{code}.KQ"
+
+    return name_map
+
+
+def resolve_ticker(user_input):
+    user_input = user_input.strip()
+
+    if not user_input:
+        return "005930.KS"
+
+    if "." in user_input:
+        return user_input.upper()
+
+    if user_input.isdigit() and len(user_input) == 6:
+        return f"{user_input}.KS"
+
+    name_map = get_kr_stock_name_map()
+
+    if user_input in name_map:
+        return name_map[user_input]
+
+    matches = [
+        (name, code)
+        for name, code in name_map.items()
+        if user_input.upper() in name.upper()
+    ]
+
+    if len(matches) == 1:
+        return matches[0][1]
+
+    if len(matches) > 1:
+        selected_name = st.selectbox(
+            "검색 결과가 여러 개입니다. 종목을 선택해주세요.",
+            [name for name, code in matches]
+        )
+        return dict(matches)[selected_name]
+
+    return user_input.upper()
+
+
 col1, col2, col3 = st.columns(3)
 
 with col1:
-    ticker = st.text_input("종목코드", value="005930.KS")
+    ticker_input = st.text_input("종목명 또는 종목코드", value="삼성전자")
 
 with col2:
     period = st.selectbox(
@@ -51,6 +113,12 @@ with col3:
         index=0
     )
 
+
+ticker = resolve_ticker(ticker_input)
+
+st.caption(f"조회 티커: {ticker}")
+
+
 interval_map = {
     "일봉": "1d",
     "주봉": "1wk",
@@ -58,6 +126,7 @@ interval_map = {
 }
 
 interval = interval_map[interval_label]
+
 
 data = yf.download(
     ticker,
@@ -67,17 +136,22 @@ data = yf.download(
     progress=False
 )
 
+
 if isinstance(data.columns, pd.MultiIndex):
     data.columns = data.columns.get_level_values(0)
 
+
 if data.empty:
-    st.error("데이터를 가져오지 못했습니다. 종목코드를 확인해주세요.")
+    st.error("데이터를 가져오지 못했습니다. 종목명 또는 종목코드를 확인해주세요.")
     st.stop()
+
 
 data.index = pd.to_datetime(data.index)
 
+
 monthly_double_bands = []
 merged_double_bands = []
+
 
 if interval_label == "일봉":
     monthly_groups = data.groupby(data.index.to_period("M"))
@@ -113,15 +187,18 @@ if interval_label == "일봉":
     if current_group is not None:
         merged_double_bands.append(current_group)
 
+
 data = data.reset_index()
 date_col = "Date" if "Date" in data.columns else "Datetime"
 data["time"] = pd.to_datetime(data[date_col]).dt.strftime("%Y-%m-%d")
+
 
 data["MA5"] = data["Close"].rolling(5).mean()
 data["MA20"] = data["Close"].rolling(20).mean()
 data["MA60"] = data["Close"].rolling(60).mean()
 data["MA120"] = data["Close"].rolling(120).mean()
 data["MA240"] = data["Close"].rolling(240).mean()
+
 
 candles = []
 
@@ -134,6 +211,7 @@ for _, row in data.iterrows():
         "close": round(float(row["Close"]), 2),
     })
 
+
 def make_line(series_name):
     result = []
 
@@ -145,11 +223,13 @@ def make_line(series_name):
 
     return result
 
+
 ma5 = make_line("MA5")
 ma20 = make_line("MA20")
 ma60 = make_line("MA60")
 ma120 = make_line("MA120")
 ma240 = make_line("MA240")
+
 
 html = f"""
 <!DOCTYPE html>
@@ -600,9 +680,12 @@ html = f"""
 </html>
 """
 
+
 components.html(html, height=660, scrolling=False)
 
+
 latest = data.dropna().iloc[-1]
+
 
 st.subheader("현재 상태")
 
@@ -612,6 +695,7 @@ c1.metric("현재가", f"{latest['Close']:,.0f}")
 c2.metric("MA5", f"{latest['MA5']:,.0f}")
 c3.metric("MA20", f"{latest['MA20']:,.0f}")
 c4.metric("MA60", f"{latest['MA60']:,.0f}")
+
 
 with st.expander("최근 데이터 보기"):
     st.dataframe(data.tail(30))
