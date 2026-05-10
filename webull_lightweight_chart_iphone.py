@@ -299,7 +299,7 @@ html = f"""
         }}
 
         #chart {{
-            width: calc(100% - 36px);
+            width: calc(100% - 18px);
             height: 620px;
             position: relative;
             background: #0b0f14;
@@ -311,7 +311,7 @@ html = f"""
         @media (max-width: 768px) {{
             #chart {{
                 height: 520px;
-                width: calc(100% - 44px);
+                width: calc(100% - 18px);
                 background: #0b0f14;
                 touch-action: none;
             }}
