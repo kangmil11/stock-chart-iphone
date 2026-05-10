@@ -17,7 +17,7 @@ st.title("Webull 스타일 주식 차트")
 st.markdown(
     """
     <style>
-    @media (max-width: 768px) {
+    @media (max-width: 738px) {
         #chart {
             height: 430px;
             width: calc(100% - 32px);
