@@ -189,9 +189,7 @@ with col3:
 
 
 ticker = resolve_ticker(ticker_input)
-
 st.caption(f"조회 티커: {ticker}")
-
 
 interval_map = {
     "일봉": "1d",
@@ -210,22 +208,18 @@ data = yf.download(
     progress=False
 )
 
-
 if isinstance(data.columns, pd.MultiIndex):
     data.columns = data.columns.get_level_values(0)
-
 
 if data.empty:
     st.error("데이터를 가져오지 못했습니다. 종목명 또는 종목코드를 확인해주세요.")
     st.stop()
-
 
 data.index = pd.to_datetime(data.index)
 
 
 monthly_double_bands = []
 merged_double_bands = []
-
 
 if interval_label == "일봉":
     monthly_groups = data.groupby(data.index.to_period("M"))
@@ -265,7 +259,6 @@ if interval_label == "일봉":
 data = data.reset_index()
 date_col = "Date" if "Date" in data.columns else "Datetime"
 data["time"] = pd.to_datetime(data[date_col]).dt.strftime("%Y-%m-%d")
-
 
 data["MA5"] = data["Close"].rolling(5).mean()
 data["MA20"] = data["Close"].rolling(20).mean()
@@ -461,6 +454,15 @@ html = f"""
             z-index: 7;
         }}
 
+        #drag-zoom-box {{
+            position: absolute;
+            display: none;
+            border: 1px solid rgba(255, 255, 255, 0.85);
+            background: rgba(255, 255, 255, 0.12);
+            z-index: 40;
+            pointer-events: none;
+        }}
+
         .month-line {{
             position: absolute;
             top: 0;
@@ -623,6 +625,7 @@ html = f"""
         <div id="wave-bands"></div>
         <div id="double-month-bands"></div>
         <div id="big-markers"></div>
+        <div id="drag-zoom-box"></div>
         <div id="month-lines"></div>
 
         <div class="ma-legend">
@@ -658,6 +661,7 @@ html = f"""
         const doubleMonthLayer = document.getElementById('double-month-bands');
         const waveLayer = document.getElementById('wave-bands');
         const bigLayer = document.getElementById('big-markers');
+        const dragZoomBox = document.getElementById('drag-zoom-box');
 
         const doubleToggle = document.getElementById('double-toggle');
         const waveToggle = document.getElementById('wave-toggle');
@@ -723,8 +727,8 @@ html = f"""
             }},
 
             handleScroll: {{
-                mouseWheel: true,
-                pressedMouseMove: true,
+                mouseWheel: false,
+                pressedMouseMove: false,
                 horzTouchDrag: true,
                 vertTouchDrag: true,
             }},
@@ -1030,6 +1034,107 @@ html = f"""
                 bigToggle.classList.add('mode2');
             }} else {{
                 bigToggle.classList.remove('mode2');
+            }}
+
+            redrawOverlays();
+        }});
+
+        let isDragZooming = false;
+        let dragStartX = 0;
+        let dragStartY = 0;
+        let dragCurrentX = 0;
+        let dragCurrentY = 0;
+
+        chartElement.addEventListener('mousedown', function(e) {{
+            if (e.button !== 0) {{
+                return;
+            }}
+
+            if (e.target.tagName === 'BUTTON') {{
+                return;
+            }}
+
+            const rect = chartElement.getBoundingClientRect();
+
+            isDragZooming = true;
+            dragStartX = e.clientX - rect.left;
+            dragStartY = e.clientY - rect.top;
+            dragCurrentX = dragStartX;
+            dragCurrentY = dragStartY;
+
+            dragZoomBox.style.display = 'block';
+            dragZoomBox.style.left = dragStartX + 'px';
+            dragZoomBox.style.top = dragStartY + 'px';
+            dragZoomBox.style.width = '0px';
+            dragZoomBox.style.height = '0px';
+
+            tooltip.style.display = 'none';
+
+            e.preventDefault();
+        }});
+
+        chartElement.addEventListener('mousemove', function(e) {{
+            if (!isDragZooming) {{
+                return;
+            }}
+
+            const rect = chartElement.getBoundingClientRect();
+
+            dragCurrentX = e.clientX - rect.left;
+            dragCurrentY = e.clientY - rect.top;
+
+            const left = Math.min(dragStartX, dragCurrentX);
+            const top = Math.min(dragStartY, dragCurrentY);
+            const width = Math.abs(dragCurrentX - dragStartX);
+            const height = Math.abs(dragCurrentY - dragStartY);
+
+            dragZoomBox.style.left = left + 'px';
+            dragZoomBox.style.top = top + 'px';
+            dragZoomBox.style.width = width + 'px';
+            dragZoomBox.style.height = height + 'px';
+
+            e.preventDefault();
+        }});
+
+        window.addEventListener('mouseup', function(e) {{
+            if (!isDragZooming) {{
+                return;
+            }}
+
+            isDragZooming = false;
+            dragZoomBox.style.display = 'none';
+
+            const dx = dragCurrentX - dragStartX;
+            const dy = dragCurrentY - dragStartY;
+
+            if (Math.abs(dx) < 20 || Math.abs(dy) < 20) {{
+                return;
+            }}
+
+            if (dx > 0 && dy > 0) {{
+                const fromTime = chart.timeScale().coordinateToTime(dragStartX);
+                const toTime = chart.timeScale().coordinateToTime(dragCurrentX);
+
+                if (fromTime !== null && toTime !== null) {{
+                    chart.timeScale().setVisibleRange({{
+                        from: fromTime,
+                        to: toTime
+                    }});
+                }}
+            }}
+
+            if (dx < 0 && dy > 0) {{
+                const range = chart.timeScale().getVisibleLogicalRange();
+
+                if (range !== null) {{
+                    const currentWidth = range.to - range.from;
+                    const expandAmount = currentWidth * 0.35;
+
+                    chart.timeScale().setVisibleLogicalRange({{
+                        from: range.from - expandAmount,
+                        to: range.to + expandAmount
+                    }});
+                }}
             }}
 
             redrawOverlays();
