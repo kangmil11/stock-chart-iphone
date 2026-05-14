@@ -1,5 +1,6 @@
 # webull_lightweight_chart_iphone.py
 
+
 import json
 import requests
 from io import BytesIO
@@ -8,11 +9,13 @@ import streamlit as st
 import yfinance as yf
 import pandas as pd
 import streamlit.components.v1 as components
+from streamlit_autorefresh import st_autorefresh
 
 
 st.set_page_config(page_title="Webull Style Chart", layout="wide")
 st.title("Webull 스타일 주식 차트")
 
+st_autorefresh(interval=10 * 1000, key="real_time_refresh")
 
 st.markdown(
     """
@@ -202,15 +205,21 @@ interval = interval_map[interval_label]
 
 data = yf.download(
     ticker,
-    period=period,
-    interval=interval,
+    period="1d",
+    interval="1m",
     auto_adjust=True,
     progress=False
 )
 
-if isinstance(data.columns, pd.MultiIndex):
-    data.columns = data.columns.get_level_values(0)
+if isinstance(live_data.columns, pd.MultiIndex):
+   live_data.columns = live_data.columns.get_level_values(0)
 
+if not live_data.empty:
+    live_price = float(live_data["Close"].dropna().iloc[-1])
+    
+else:
+    live_price = float(data["Close"].dropna().iloc[-1])
+    
 if data.empty:
     st.error("데이터를 가져오지 못했습니다. 종목명 또는 종목코드를 확인해주세요.")
     st.stop()
@@ -1175,7 +1184,7 @@ st.subheader("현재 상태")
 
 c1, c2, c3, c4 = st.columns(4)
 
-c1.metric("현재가", f"{latest['Close']:,.0f}")
+c1.metric("현재가", f"{live_price:,.0f}")
 c2.metric("MA5", f"{latest['MA5']:,.0f}")
 c3.metric("MA20", f"{latest['MA20']:,.0f}")
 c4.metric("MA60", f"{latest['MA60']:,.0f}")
