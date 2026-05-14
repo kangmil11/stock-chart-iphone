@@ -5,7 +5,6 @@ import requests
 from io import BytesIO
 
 import streamlit as st
-from streamlit_autorefresh import st_autorefresh
 import yfinance as yf
 import pandas as pd
 import streamlit.components.v1 as components
@@ -13,9 +12,6 @@ import streamlit.components.v1 as components
 
 st.set_page_config(page_title="Webull Style Chart", layout="wide")
 st.title("Webull 스타일 주식 차트")
-
-# 10초마다 자동 새로고침
-st_autorefresh(interval=10 * 1000, key="real_time_refresh")
 
 
 st.markdown(
@@ -52,7 +48,6 @@ st.markdown(
 @st.cache_data(ttl=86400)
 def get_kr_stock_name_map():
     url = "https://kind.krx.co.kr/corpgeneral/corpList.do?method=download&searchType=13"
-
     headers = {"User-Agent": "Mozilla/5.0"}
 
     response = requests.get(url, headers=headers, timeout=10)
@@ -106,8 +101,8 @@ def resolve_ticker(user_input):
         "다우": "^DJI",
         "KODEX200": "069500.KS",
         "KODEX 200": "069500.KS",
-        "TIGER 미국S&P500": "360750.KS",
-        "KODEX 미국S&P500": "379800.KS",
+        "KODEX레버리지": "122630.KS",
+        "KODEX 레버리지": "122630.KS",
     }
 
     key = user_input.upper().replace(" ", "")
@@ -215,32 +210,14 @@ data = yf.download(
     progress=False
 )
 
+
 if isinstance(data.columns, pd.MultiIndex):
     data.columns = data.columns.get_level_values(0)
-
-
-# 현재가용 1분봉 데이터
-live_data = yf.download(
-    ticker,
-    period="1d",
-    interval="1m",
-    auto_adjust=True,
-    progress=False
-)
-
-if isinstance(live_data.columns, pd.MultiIndex):
-    live_data.columns = live_data.columns.get_level_values(0)
 
 
 if data.empty:
     st.error("데이터를 가져오지 못했습니다. 종목명 또는 종목코드를 확인해주세요.")
     st.stop()
-
-
-if not live_data.empty and not live_data["Close"].dropna().empty:
-    live_price = float(live_data["Close"].dropna().iloc[-1])
-else:
-    live_price = float(data["Close"].dropna().iloc[-1])
 
 
 data.index = pd.to_datetime(data.index)
@@ -328,6 +305,80 @@ ma120 = make_line("MA120")
 ma240 = make_line("MA240")
 
 
+wave_bands = []
+
+if interval_label == "일봉":
+    wave_points = []
+
+    for _, row in data.dropna(subset=["MA120", "MA240"]).iterrows():
+        if row["MA240"] > row["MA120"]:
+            state = "blue"
+        elif row["MA240"] < row["MA120"]:
+            state = "red"
+        else:
+            state = "neutral"
+
+        wave_points.append({
+            "time": row["time"],
+            "ma120": round(float(row["MA120"]), 2),
+            "ma240": round(float(row["MA240"]), 2),
+            "state": state
+        })
+
+    current_band = []
+
+    for point in wave_points:
+        if not current_band:
+            current_band = [point]
+        elif current_band[-1]["state"] == point["state"]:
+            current_band.append(point)
+        else:
+            if len(current_band) >= 2 and current_band[0]["state"] != "neutral":
+                wave_bands.append({
+                    "state": current_band[0]["state"],
+                    "points": current_band
+                })
+            current_band = [point]
+
+    if len(current_band) >= 2 and current_band[0]["state"] != "neutral":
+        wave_bands.append({
+            "state": current_band[0]["state"],
+            "points": current_band
+        })
+
+
+big_signals = []
+
+if interval_label == "일봉":
+    big_data = data.dropna(subset=["MA60", "MA240"]).copy()
+
+    for i in range(1, len(big_data)):
+        prev = big_data.iloc[i - 1]
+        curr = big_data.iloc[i]
+
+        prev_ma60 = float(prev["MA60"])
+        prev_ma240 = float(prev["MA240"])
+        curr_ma60 = float(curr["MA60"])
+        curr_ma240 = float(curr["MA240"])
+
+        time = curr["time"]
+        cross_price = (curr_ma60 + curr_ma240) / 2
+
+        if prev_ma60 < prev_ma240 and curr_ma60 >= curr_ma240:
+            big_signals.append({
+                "time": time,
+                "price": round(cross_price, 2),
+                "type": "gold"
+            })
+
+        elif prev_ma60 > prev_ma240 and curr_ma60 <= curr_ma240:
+            big_signals.append({
+                "time": time,
+                "price": round(cross_price, 2),
+                "type": "dead"
+            })
+
+
 html = f"""
 <!DOCTYPE html>
 <html>
@@ -338,7 +389,7 @@ html = f"""
         html, body {{
             margin: 0;
             background: #444444;
-            color: #ffffff;
+            color: #444444;
             font-family: Arial, sans-serif;
         }}
 
@@ -382,7 +433,9 @@ html = f"""
             }}
         }}
 
+        #wave-bands,
         #double-month-bands,
+        #big-markers,
         #month-lines {{
             position: absolute;
             top: 0;
@@ -392,8 +445,16 @@ html = f"""
             pointer-events: none;
         }}
 
+        #wave-bands {{
+            z-index: 5;
+        }}
+
         #double-month-bands {{
             z-index: 6;
+        }}
+
+        #big-markers {{
+            z-index: 12;
         }}
 
         #month-lines {{
@@ -458,6 +519,89 @@ html = f"""
             background: rgba(255, 200, 0, 0.35);
         }}
 
+        .big-marker {{
+            position: absolute;
+            pointer-events: none;
+            text-align: center;
+            font-weight: bold;
+            white-space: nowrap;
+            text-shadow: 0 1px 3px rgba(0,0,0,0.95);
+        }}
+
+        .big-marker.gold {{
+            color: #ff0000;
+            transform: translate(-50%, 5px);
+        }}
+
+        .big-marker.dead {{
+            color: #0048ff;
+            transform: translate(-50%, calc(-100% - 5px));
+        }}
+
+        .big-arrow-shape {{
+            position: relative;
+            width: 14px;
+            height: 18px;
+            margin: 0 auto;
+        }}
+
+        .big-arrow-shape.up::before {{
+            content: "";
+            position: absolute;
+            left: 4px;
+            top: 7px;
+            width: 6px;
+            height: 11px;
+            background: #ff0000;
+        }}
+
+        .big-arrow-shape.up::after {{
+            content: "";
+            position: absolute;
+            left: 0;
+            top: 0;
+            width: 0;
+            height: 0;
+            border-left: 7px solid transparent;
+            border-right: 7px solid transparent;
+            border-bottom: 8px solid #ff0000;
+        }}
+
+        .big-arrow-shape.down::before {{
+            content: "";
+            position: absolute;
+            left: 4px;
+            top: 0;
+            width: 6px;
+            height: 11px;
+            background: #0048ff;
+        }}
+
+        .big-arrow-shape.down::after {{
+            content: "";
+            position: absolute;
+            left: 0;
+            top: 10px;
+            width: 0;
+            height: 0;
+            border-left: 7px solid transparent;
+            border-right: 7px solid transparent;
+            border-top: 8px solid #0048ff;
+        }}
+
+        .big-text {{
+            font-size: 11px;
+            line-height: 12px;
+        }}
+
+        .big-marker.gold .big-text {{
+            margin-top: 1px;
+        }}
+
+        .big-marker.dead .big-text {{
+            margin-bottom: 1px;
+        }}
+
         .tooltip {{
             position: absolute;
             display: none;
@@ -476,7 +620,9 @@ html = f"""
 
 <body>
     <div id="chart">
+        <div id="wave-bands"></div>
         <div id="double-month-bands"></div>
+        <div id="big-markers"></div>
         <div id="month-lines"></div>
 
         <div class="ma-legend">
@@ -486,6 +632,8 @@ html = f"""
             <span style="color:dodgerblue">MA120</span>
             <span style="color:#f000ff">MA240</span>
             <button id="double-toggle" class="double-btn" type="button">Double</button>
+            <button id="wave-toggle" class="double-btn" type="button">Wave</button>
+            <button id="big-toggle" class="double-btn" type="button">Big</button>
         </div>
 
         <div id="tooltip" class="tooltip"></div>
@@ -495,6 +643,8 @@ html = f"""
         const candles = {json.dumps(candles)};
         const monthlyDoubleBands = {json.dumps(monthly_double_bands)};
         const mergedDoubleBands = {json.dumps(merged_double_bands)};
+        const waveBands = {json.dumps(wave_bands)};
+        const bigSignals = {json.dumps(big_signals)};
 
         const ma5 = {json.dumps(ma5)};
         const ma20 = {json.dumps(ma20)};
@@ -506,11 +656,18 @@ html = f"""
         const tooltip = document.getElementById('tooltip');
         const monthLinesLayer = document.getElementById('month-lines');
         const doubleMonthLayer = document.getElementById('double-month-bands');
+        const waveLayer = document.getElementById('wave-bands');
+        const bigLayer = document.getElementById('big-markers');
+
         const doubleToggle = document.getElementById('double-toggle');
+        const waveToggle = document.getElementById('wave-toggle');
+        const bigToggle = document.getElementById('big-toggle');
 
         const chartHeight = window.innerWidth <= 768 ? 520 : 620;
 
         let doubleMode = 0;
+        let waveMode = false;
+        let bigMode = false;
 
         const chart = LightweightCharts.createChart(chartElement, {{
             width: chartElement.clientWidth,
@@ -732,7 +889,105 @@ html = f"""
             }});
         }}
 
+        function drawWaveBands() {{
+            waveLayer.innerHTML = '';
+
+            if (!waveMode) {{
+                return;
+            }}
+
+            waveBands.forEach(function(band) {{
+                const topPoints = [];
+                const bottomPoints = [];
+
+                band.points.forEach(function(point) {{
+                    const x = chart.timeScale().timeToCoordinate(point.time);
+
+                    const y240 = candleSeries.priceToCoordinate(point.ma240);
+                    const y120 = candleSeries.priceToCoordinate(point.ma120);
+
+                    if (x === null || y240 === null || y120 === null) {{
+                        return;
+                    }}
+
+                    topPoints.push([x, y240]);
+                    bottomPoints.push([x, y120]);
+                }});
+
+                if (topPoints.length < 2 || bottomPoints.length < 2) {{
+                    return;
+                }}
+
+                const polygonPoints = topPoints
+                    .concat(bottomPoints.reverse())
+                    .map(function(p) {{
+                        return p[0] + ',' + p[1];
+                    }})
+                    .join(' ');
+
+                const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+                svg.style.position = 'absolute';
+                svg.style.left = '0';
+                svg.style.top = '0';
+                svg.style.width = '100%';
+                svg.style.height = '100%';
+                svg.style.overflow = 'visible';
+
+                const polygon = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
+                polygon.setAttribute('points', polygonPoints);
+
+                if (band.state === 'blue') {{
+                    polygon.setAttribute('fill', 'rgba(0, 80, 255, 0.18)');
+                }} else {{
+                    polygon.setAttribute('fill', 'rgba(255, 0, 0, 0.18)');
+                }}
+
+                polygon.setAttribute('stroke', 'none');
+
+                svg.appendChild(polygon);
+                waveLayer.appendChild(svg);
+            }});
+        }}
+
+        function drawBigSignals() {{
+            bigLayer.innerHTML = '';
+
+            if (!bigMode) {{
+                return;
+            }}
+
+            bigSignals.forEach(function(signal) {{
+                const x = chart.timeScale().timeToCoordinate(signal.time);
+                const y = candleSeries.priceToCoordinate(signal.price);
+
+                if (x === null || y === null) {{
+                    return;
+                }}
+
+                const marker = document.createElement('div');
+
+                if (signal.type === 'gold') {{
+                    marker.className = 'big-marker gold';
+                    marker.innerHTML =
+                        '<div class="big-arrow-shape up"></div>' +
+                        '<div class="big-text">빅골드</div>';
+                }} else {{
+                    marker.className = 'big-marker dead';
+                    marker.innerHTML =
+                        '<div class="big-text">빅데드</div>' +
+                        '<div class="big-arrow-shape down"></div>';
+                }}
+
+                marker.style.left = x + 'px';
+                marker.style.top = y + 'px';
+
+                bigLayer.appendChild(marker);
+            }});
+        }}
+
         function redrawOverlays() {{
+            drawWaveBands();
+            drawBigSignals();
             drawMonthLines();
             drawMonthlyDoubleBands();
         }}
@@ -751,6 +1006,30 @@ html = f"""
                 doubleToggle.innerText = 'Double 2';
             }} else {{
                 doubleToggle.innerText = 'Double';
+            }}
+
+            redrawOverlays();
+        }});
+
+        waveToggle.addEventListener('click', function() {{
+            waveMode = !waveMode;
+
+            if (waveMode) {{
+                waveToggle.classList.add('mode2');
+            }} else {{
+                waveToggle.classList.remove('mode2');
+            }}
+
+            redrawOverlays();
+        }});
+
+        bigToggle.addEventListener('click', function() {{
+            bigMode = !bigMode;
+
+            if (bigMode) {{
+                bigToggle.classList.add('mode2');
+            }} else {{
+                bigToggle.classList.remove('mode2');
             }}
 
             redrawOverlays();
@@ -791,7 +1070,7 @@ st.subheader("현재 상태")
 
 c1, c2, c3, c4 = st.columns(4)
 
-c1.metric("현재가", f"{live_price:,.0f}")
+c1.metric("현재가", f"{latest['Close']:,.0f}")
 c2.metric("MA5", f"{latest['MA5']:,.0f}")
 c3.metric("MA20", f"{latest['MA20']:,.0f}")
 c4.metric("MA60", f"{latest['MA60']:,.0f}")
