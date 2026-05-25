@@ -263,6 +263,20 @@ if interval_label == "일봉":
 
 
 data = data.reset_index()
+    if "time" not in data.columns:
+
+    if "Date" in data.columns:
+
+        data["time"] = data["Date"]
+
+    elif "Datetime" in data.columns:
+
+        data["time"] = data["Datetime"]
+
+    else:
+
+        data["time"] = data.index
+
 date_col = "Date" if "Date" in data.columns else "Datetime"
 data["time"] = pd.to_datetime(data[date_col]).dt.strftime("%Y-%m-%d")
 
