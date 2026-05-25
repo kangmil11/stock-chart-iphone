@@ -262,17 +262,25 @@ if interval_label == "일봉":
         merged_double_bands.append(current_group)
 
 
+# 날짜 컬럼 안전 처리
 data = data.reset_index()
-if "time" not in data.columns:
-    if "Date" in data.columns:
-        data["time"] = data["Date"]
-    elif "Datetime" in data.columns:
-        data["time"] = data["Datetime"]
-    else:
-        data["time"] = data.index
 
-date_col = "Date" if "Date" in data.columns else "Datetime"
-data["time"] = pd.to_datetime(data[date_col]).dt.strftime("%Y-%m-%d")
+possible_date_cols = ["Date", "Datetime", "index"]
+
+date_col = None
+
+for col in possible_date_cols:
+    if col in data.columns:
+        date_col = col
+        break
+
+if date_col is None:
+    st.error("날짜 컬럼을 찾지 못했습니다.")
+    st.write("현재 컬럼 목록:", list(data.columns))
+    st.stop()
+
+data["time"] = pd.to_datetime(data[date_col], errors="coerce").dt.strftime("%Y-%m-%d")
+data = data.dropna(subset=["time"])
 
 
 data["MA5"] = data["Close"].rolling(5).mean()
@@ -1072,7 +1080,13 @@ html = f"""
 components.html(html, height=660, scrolling=False)
 
 
-latest = data.dropna().iloc[-1]
+latest_data = data.dropna(subset=["Close", "MA5", "MA20", "MA60"])
+
+if latest_data.empty:
+    st.warning("이동평균선을 계산하기에 데이터가 부족합니다.")
+    st.stop()
+
+latest = latest_data.iloc[-1]
 
 st.subheader("현재 상태")
 
