@@ -1,7 +1,6 @@
-streamlit>=1.32.0
-yfinance>=0.2.40
-pandas>=2.2.0
-requests
-lxml
-html5lib
-beautifulsoup4
+streamlit==1.66.1
+pandas==3.1.0
+yfinance==1.7.0
+finance-datareader==0.9.202
+requests==2.34.2
+lxml==6.1.3

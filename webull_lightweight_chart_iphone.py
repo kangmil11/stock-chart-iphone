@@ -1,8 +1,10 @@
 # webull_lightweight_chart_iphone.py
 
 import json
-import requests
-from io import BytesIO
+import re
+from pathlib import Path
+
+import FinanceDataReader as fdr
 
 import streamlit as st
 import yfinance as yf
@@ -45,115 +47,106 @@ st.markdown(
 )
 
 
-@st.cache_data(ttl=86400, show_spinner=False)
-def get_kr_stock_name_map():
-    """Return name -> (six-digit code, Yahoo suffix) from KRX or Naver."""
-    result = {}
-    headers = {"User-Agent": "Mozilla/5.0 (compatible; StockChart/1.0)", "Referer": "https://finance.naver.com/"}
-
-    # Naver Finance lists KOSPI and KOSDAQ separately, so suffixes are known.
-    for market, suffix in ((0, ".KS"), (1, ".KQ")):
-        try:
-            for page in range(1, 55):
-                url = "https://finance.naver.com/sise/sise_market_sum.naver"
-                response = requests.get(url, params={"sosok": market, "page": page}, headers=headers, timeout=8)
-                response.raise_for_status()
-                response.encoding = "euc-kr"
-                from bs4 import BeautifulSoup
-                soup = BeautifulSoup(response.text, "html.parser")
-                anchors = soup.select('a[href*="/item/main.naver?code="]')
-                found = 0
-                for anchor in anchors:
-                    import re
-                    match = re.search(r"code=(\d{6})", anchor.get("href", ""))
-                    name = anchor.get_text(" ", strip=True)
-                    if match and name:
-                        result[name] = (match.group(1), suffix)
-                        found += 1
-                if not found:
-                    break
-        except (requests.RequestException, ValueError):
-            pass
-
-    # KRX KIND is a secondary source. Its endpoint can reject cloud servers.
-    try:
-        url = "https://kind.krx.co.kr/corpgeneral/corpList.do?method=download&searchType=13"
-        response = requests.get(url, headers=headers, timeout=8)
-        response.raise_for_status()
-        df = pd.read_html(BytesIO(response.content))[0]
-        if {"회사명", "종목코드"}.issubset(df.columns):
-            for _, row in df.iterrows():
-                name = str(row["회사명"]).strip()
-                code = str(row["종목코드"]).split(".")[0].zfill(6)
-                if name and len(code) == 6:
-                    result.setdefault(name, (code, None))
-    except (requests.RequestException, ValueError, KeyError, ImportError, IndexError):
-        pass
-
-    # Always allow a few popular names even if both providers are down.
-    for name, code, suffix in [
-        ("삼성전자", "005930", ".KS"), ("현대모비스", "012330", ".KS"),
-        ("SK하이닉스", "000660", ".KS"), ("NAVER", "035420", ".KS"),
-        ("카카오", "035720", ".KS"), ("LG에너지솔루션", "373220", ".KS")
-    ]:
-        result.setdefault(name, (code, suffix))
-    return result
+CSV_PATH = Path(__file__).resolve().with_name("kr_stock_list.csv")
 
 
-@st.cache_data(ttl=3600, show_spinner=False)
-def test_yfinance_ticker(ticker):
-    try:
-        test_data = yf.download(ticker, period="5d", interval="1d", auto_adjust=True, progress=False, threads=False)
-        return not test_data.empty
-    except Exception:
-        return False
+@st.cache_data(show_spinner=False)
+def load_kr_stocks(path, modified_ns):
+    # modified_ns invalidates Streamlit's cache when the CSV is replaced.
+    frame = pd.read_csv(path, dtype=str, keep_default_na=False, encoding="utf-8-sig")
+    required = {"Code", "Name", "Market", "AsOf"}
+    if not required.issubset(frame.columns):
+        raise ValueError("CSV에 Code, Name, Market, AsOf 열이 필요합니다.")
+    if frame.empty or not frame["Code"].str.fullmatch(r"[0-9A-Z]{6}").all():
+        raise ValueError("CSV 종목코드 형식을 확인해주세요.")
+    return frame.drop_duplicates("Code").sort_values(["Name", "Code"])
 
 
-def resolve_ticker(user_input):
+def normalize_name(value):
+    return re.sub(r"\s+", "", value).casefold()
+
+
+INDEX_MAP = {
+    "KOSPI200": "^KS200", "코스피200": "^KS200", "^KS200": "^KS200",
+    "KOSPI": "^KS11", "코스피": "^KS11",
+    "KOSDAQ": "^KQ11", "코스닥": "^KQ11",
+    "SPX": "^GSPC", "S&P500": "^GSPC",
+    "NASDAQ": "^IXIC", "나스닥": "^IXIC", "DOW": "^DJI", "다우": "^DJI",
+    "KODEX200": "069500", "KODEX레버리지": "122630",
+}
+
+
+def resolve_ticker(user_input, stocks, market="자동"):
     query = user_input.strip()
+    key = normalize_name(query).upper()
     if not query:
         return "^KS200"
-
-    aliases = {
-        "KOSPI200": "^KS200", "코스피200": "^KS200", "KOSPI 200": "^KS200",
-        "KOSPI": "^KS11", "코스피": "^KS11",
-        "KOSDAQ": "^KQ11", "코스닥": "^KQ11",
-        "SPX": "^GSPC", "S&P500": "^GSPC", "NASDAQ": "^IXIC",
-        "나스닥": "^IXIC", "DOW": "^DJI", "다우": "^DJI",
-        "KODEX200": "069500.KS", "KODEX레버리지": "122630.KS"
-    }
-    normalized = query.upper().replace(" ", "")
-    for name, symbol in aliases.items():
-        if normalized == name.upper().replace(" ", ""):
-            return symbol
-    if query.startswith("^") or "." in query:
+    if key in INDEX_MAP:
+        return INDEX_MAP[key]
+    # Never append Yahoo's suffix to a Korean code. Normalize pasted legacy codes too.
+    code = re.sub(r"\.(KS|KQ)$", "", query.upper())
+    if re.fullmatch(r"[0-9]{6}", code) or code in set(stocks["Code"]):
+        return code
+    if market == "미국":
         return query.upper()
+    names = stocks["Name"].map(normalize_name)
+    exact = stocks[names == normalize_name(query)]
+    matches = exact if not exact.empty else stocks[
+        names.str.contains(normalize_name(query), regex=False)
+        | stocks["Code"].str.contains(query.upper(), regex=False)
+    ]
+    # US tickers remain available even if their letters occur in Korean company names.
+    if exact.empty and market == "자동" and re.fullmatch(r"[A-Za-z^][A-Za-z0-9.^=/-]*", query):
+        return query.upper()
+    if not matches.empty:
+        labels = {
+            row.Code: f"{row.Name} · {row.Code} · {row.Market}"
+            for row in matches.itertuples()
+        }
+        selected = st.selectbox(
+            "한국 종목 선택 (목록 안에서 입력하여 자동완성)",
+            list(labels), format_func=labels.get,
+            index=0 if len(matches) == 1 else None,
+            placeholder="검색 결과에서 종목을 선택하세요",
+            key=f"kr_match_{query}_{market}",
+        )
+        if selected is None:
+            st.info(f"{len(matches):,}개 검색 결과 중 조회할 종목을 선택해주세요.")
+            st.stop()
+        return selected
+    st.error("일치하는 한국 종목이 없습니다. 검색어 또는 CSV 갱신 여부를 확인해주세요.")
+    st.stop()
 
-    name_map = get_kr_stock_name_map()
-    if query.isdigit() and len(query) == 6:
-        for _, (code, suffix) in name_map.items():
-            if code == query and suffix:
-                return code + suffix
-        return query + (".KS" if test_yfinance_ticker(query + ".KS") else ".KQ")
 
-    matches = [(name, code, suffix) for name, (code, suffix) in name_map.items()
-               if normalized in name.upper().replace(" ", "")]
-    matches.sort(key=lambda item: (item[0].upper().replace(" ", "") != normalized, len(item[0]), item[0]))
-    if matches:
-        if len(matches) == 1 or matches[0][0].upper().replace(" ", "") == normalized:
-            name, code, suffix = matches[0]
-        else:
-            options = [f"{name} ({code})" for name, code, _ in matches[:100]]
-            chosen = st.selectbox("검색 결과에서 종목 선택", options)
-            name, code, suffix = matches[options.index(chosen)]
-        if suffix:
-            return code + suffix
-        return code + (".KS" if test_yfinance_ticker(code + ".KS") else ".KQ")
+@st.cache_data(ttl=600, show_spinner=False)
+def download_prices(ticker, period, interval):
+    if re.fullmatch(r"[0-9A-Z]{6}", ticker) and (
+        ticker[0].isdigit() or ticker in set(kr_stocks["Code"])
+    ):
+        start = pd.Timestamp.now(tz="Asia/Seoul").tz_localize(None).normalize() - pd.DateOffset(
+            months={"3mo": 3, "6mo": 6, "1y": 12, "2y": 24, "3y": 36, "5y": 60}[period]
+        )
+        # NAVER accepts the bare Korean code; do not send it to yfinance.
+        prices = fdr.DataReader(f"NAVER:{ticker}", start.strftime("%Y-%m-%d"))
+        if not prices.empty and interval != "1d":
+            rule = "W-FRI" if interval == "1wk" else "ME"
+            prices = prices.resample(rule).agg({
+                "Open": "first", "High": "max", "Low": "min", "Close": "last", "Volume": "sum"
+            }).dropna(subset=["Open", "High", "Low", "Close"])
+        prices.index.name = "Date"
+        return prices
+    return yf.download(ticker, period=period, interval=interval, auto_adjust=True, progress=False)
 
-    if any("가" <= c <= "힣" for c in query):
-        st.warning("해당 종목을 찾지 못했어. 종목코드 6자리로도 검색해 봐. (종목 목록 제공 서버가 일시적으로 차단됐을 수 있어.)")
-        st.stop()
-    return query.upper()  # US ticker, e.g. AAPL, SPY
+
+try:
+    kr_stocks = load_kr_stocks(str(CSV_PATH), CSV_PATH.stat().st_mtime_ns)
+except (OSError, ValueError, pd.errors.ParserError) as exc:
+    st.error(f"종목 목록을 읽을 수 없습니다: {exc}")
+    st.info("kr_stock_list.csv를 Python 파일과 같은 폴더에 업로드해주세요.")
+    st.stop()
+
+st.caption(f"한국 종목 목록 기준일: {kr_stocks['AsOf'].min()} · {len(kr_stocks):,}종목")
+market = st.selectbox("시장", ["자동", "한국", "미국"], help="영문 한국 종목의 부분검색은 한국을 선택하세요. 미국 티커는 미국을 선택하면 바로 조회합니다.")
 
 
 col1, col2, col3 = st.columns(3)
@@ -176,7 +169,7 @@ with col3:
     )
 
 
-ticker = resolve_ticker(ticker_input)
+ticker = resolve_ticker(ticker_input, kr_stocks, market)
 
 st.caption(f"조회 티커: {ticker}")
 
@@ -191,12 +184,11 @@ interval = interval_map[interval_label]
 
 
 try:
-    data = yf.download(
-        ticker, period=period, interval=interval,
-        auto_adjust=True, progress=False, threads=False
-    )
+    with st.spinner("주가를 불러오는 중입니다..."):
+        data = download_prices(ticker, period, interval)
 except Exception as exc:
-    st.error(f"가격 데이터 요청에 실패했어: {exc}")
+    st.error(f"주가 조회에 실패했습니다 ({ticker}): {exc}")
+    st.info("잠시 후 다시 시도해주세요. 종목 목록 검색은 로컬 CSV를 사용하지만 주가는 인터넷 연결이 필요합니다.")
     st.stop()
 
 
