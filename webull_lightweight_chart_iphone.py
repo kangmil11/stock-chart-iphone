@@ -45,133 +45,121 @@ st.markdown(
 )
 
 
-@st.cache_data(ttl=86400)
+@st.cache_data(ttl=86400, show_spinner=False)
 def get_kr_stock_name_map():
-    url = "https://kind.krx.co.kr/corpgeneral/corpList.do?method=download&searchType=13"
-    headers = {"User-Agent": "Mozilla/5.0"}
+    """Return name -> (six-digit code, Yahoo suffix) from KRX or Naver."""
+    result = {}
+    headers = {"User-Agent": "Mozilla/5.0 (compatible; StockChart/1.0)", "Referer": "https://finance.naver.com/"}
 
-    response = requests.get(url, headers=headers, timeout=10)
-    response.raise_for_status()
+    # Naver Finance lists KOSPI and KOSDAQ separately, so suffixes are known.
+    for market, suffix in ((0, ".KS"), (1, ".KQ")):
+        try:
+            for page in range(1, 55):
+                url = "https://finance.naver.com/sise/sise_market_sum.naver"
+                response = requests.get(url, params={"sosok": market, "page": page}, headers=headers, timeout=8)
+                response.raise_for_status()
+                response.encoding = "euc-kr"
+                from bs4 import BeautifulSoup
+                soup = BeautifulSoup(response.text, "html.parser")
+                anchors = soup.select('a[href*="/item/main.naver?code="]')
+                found = 0
+                for anchor in anchors:
+                    import re
+                    match = re.search(r"code=(\d{6})", anchor.get("href", ""))
+                    name = anchor.get_text(" ", strip=True)
+                    if match and name:
+                        result[name] = (match.group(1), suffix)
+                        found += 1
+                if not found:
+                    break
+        except (requests.RequestException, ValueError):
+            pass
 
-    df = pd.read_html(BytesIO(response.content), header=0)[0]
-    df["종목코드"] = df["종목코드"].astype(str).str.zfill(6)
+    # KRX KIND is a secondary source. Its endpoint can reject cloud servers.
+    try:
+        url = "https://kind.krx.co.kr/corpgeneral/corpList.do?method=download&searchType=13"
+        response = requests.get(url, headers=headers, timeout=8)
+        response.raise_for_status()
+        df = pd.read_html(BytesIO(response.content))[0]
+        if {"회사명", "종목코드"}.issubset(df.columns):
+            for _, row in df.iterrows():
+                name = str(row["회사명"]).strip()
+                code = str(row["종목코드"]).split(".")[0].zfill(6)
+                if name and len(code) == 6:
+                    result.setdefault(name, (code, None))
+    except (requests.RequestException, ValueError, KeyError, ImportError, IndexError):
+        pass
 
-    name_map = {}
+    # Always allow a few popular names even if both providers are down.
+    for name, code, suffix in [
+        ("삼성전자", "005930", ".KS"), ("현대모비스", "012330", ".KS"),
+        ("SK하이닉스", "000660", ".KS"), ("NAVER", "035420", ".KS"),
+        ("카카오", "035720", ".KS"), ("LG에너지솔루션", "373220", ".KS")
+    ]:
+        result.setdefault(name, (code, suffix))
+    return result
 
-    for _, row in df.iterrows():
-        name = str(row["회사명"]).strip()
-        code = str(row["종목코드"]).strip()
-        name_map[name] = code
 
-    return name_map
-
-
-@st.cache_data(ttl=3600)
+@st.cache_data(ttl=3600, show_spinner=False)
 def test_yfinance_ticker(ticker):
     try:
-        test_data = yf.download(
-            ticker,
-            period="5d",
-            interval="1d",
-            auto_adjust=True,
-            progress=False
-        )
+        test_data = yf.download(ticker, period="5d", interval="1d", auto_adjust=True, progress=False, threads=False)
         return not test_data.empty
     except Exception:
         return False
 
 
 def resolve_ticker(user_input):
-    user_input = user_input.strip()
+    query = user_input.strip()
+    if not query:
+        return "^KS200"
 
-    if not user_input:
-        return "005930.KS"
-
-    index_map = {
-        "KOSPI": "^KS11",
-        "코스피": "^KS11",
-        "KOSDAQ": "^KQ11",
-        "코스닥": "^KQ11",
-        "SPX": "^GSPC",
-        "S&P500": "^GSPC",
-        "S&P 500": "^GSPC",
-        "NASDAQ": "^IXIC",
-        "나스닥": "^IXIC",
-        "DOW": "^DJI",
-        "다우": "^DJI",
-        "KODEX200": "069500.KS",
-        "KODEX 200": "069500.KS",
-        "KODEX레버리지": "122630.KS",
-        "KODEX 레버리지": "122630.KS",
+    aliases = {
+        "KOSPI200": "^KS200", "코스피200": "^KS200", "KOSPI 200": "^KS200",
+        "KOSPI": "^KS11", "코스피": "^KS11",
+        "KOSDAQ": "^KQ11", "코스닥": "^KQ11",
+        "SPX": "^GSPC", "S&P500": "^GSPC", "NASDAQ": "^IXIC",
+        "나스닥": "^IXIC", "DOW": "^DJI", "다우": "^DJI",
+        "KODEX200": "069500.KS", "KODEX레버리지": "122630.KS"
     }
-
-    key = user_input.upper().replace(" ", "")
-
-    for name, symbol in index_map.items():
-        if key == name.upper().replace(" ", ""):
+    normalized = query.upper().replace(" ", "")
+    for name, symbol in aliases.items():
+        if normalized == name.upper().replace(" ", ""):
             return symbol
-
-    if "." in user_input:
-        return user_input.upper()
-
-    if user_input.isdigit() and len(user_input) == 6:
-        ks_ticker = f"{user_input}.KS"
-        kq_ticker = f"{user_input}.KQ"
-
-        if test_yfinance_ticker(ks_ticker):
-            return ks_ticker
-        return kq_ticker
+    if query.startswith("^") or "." in query:
+        return query.upper()
 
     name_map = get_kr_stock_name_map()
+    if query.isdigit() and len(query) == 6:
+        for _, (code, suffix) in name_map.items():
+            if code == query and suffix:
+                return code + suffix
+        return query + (".KS" if test_yfinance_ticker(query + ".KS") else ".KQ")
 
-    if user_input in name_map:
-        code = name_map[user_input]
+    matches = [(name, code, suffix) for name, (code, suffix) in name_map.items()
+               if normalized in name.upper().replace(" ", "")]
+    matches.sort(key=lambda item: (item[0].upper().replace(" ", "") != normalized, len(item[0]), item[0]))
+    if matches:
+        if len(matches) == 1 or matches[0][0].upper().replace(" ", "") == normalized:
+            name, code, suffix = matches[0]
+        else:
+            options = [f"{name} ({code})" for name, code, _ in matches[:100]]
+            chosen = st.selectbox("검색 결과에서 종목 선택", options)
+            name, code, suffix = matches[options.index(chosen)]
+        if suffix:
+            return code + suffix
+        return code + (".KS" if test_yfinance_ticker(code + ".KS") else ".KQ")
 
-        ks_ticker = f"{code}.KS"
-        kq_ticker = f"{code}.KQ"
-
-        if test_yfinance_ticker(ks_ticker):
-            return ks_ticker
-        return kq_ticker
-
-    matches = [
-        (name, code)
-        for name, code in name_map.items()
-        if user_input.upper() in name.upper()
-    ]
-
-    if len(matches) == 1:
-        code = matches[0][1]
-
-        ks_ticker = f"{code}.KS"
-        kq_ticker = f"{code}.KQ"
-
-        if test_yfinance_ticker(ks_ticker):
-            return ks_ticker
-        return kq_ticker
-
-    if len(matches) > 1:
-        selected_name = st.selectbox(
-            "검색 결과가 여러 개입니다. 종목을 선택해주세요.",
-            [name for name, code in matches]
-        )
-
-        code = dict(matches)[selected_name]
-
-        ks_ticker = f"{code}.KS"
-        kq_ticker = f"{code}.KQ"
-
-        if test_yfinance_ticker(ks_ticker):
-            return ks_ticker
-        return kq_ticker
-
-    return user_input.upper()
+    if any("가" <= c <= "힣" for c in query):
+        st.warning("해당 종목을 찾지 못했어. 종목코드 6자리로도 검색해 봐. (종목 목록 제공 서버가 일시적으로 차단됐을 수 있어.)")
+        st.stop()
+    return query.upper()  # US ticker, e.g. AAPL, SPY
 
 
 col1, col2, col3 = st.columns(3)
 
 with col1:
-    ticker_input = st.text_input("종목명 또는 종목코드", value="삼성전자")
+    ticker_input = st.text_input("종목명 또는 종목코드", value="KOSPI200")
 
 with col2:
     period = st.selectbox(
@@ -202,13 +190,14 @@ interval_map = {
 interval = interval_map[interval_label]
 
 
-data = yf.download(
-    ticker,
-    period=period,
-    interval=interval,
-    auto_adjust=True,
-    progress=False
-)
+try:
+    data = yf.download(
+        ticker, period=period, interval=interval,
+        auto_adjust=True, progress=False, threads=False
+    )
+except Exception as exc:
+    st.error(f"가격 데이터 요청에 실패했어: {exc}")
+    st.stop()
 
 
 if isinstance(data.columns, pd.MultiIndex):
